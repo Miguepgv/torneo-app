@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -204,10 +205,12 @@ export default function AdminEquipoDetallePage() {
 
               <div className="mt-4 flex flex-wrap items-center gap-4">
                 {equipo.logo_url ? (
-                  <img
+                  <Image
                     alt="Escudo equipo"
                     className="h-20 w-20 rounded-full border border-slate-200 object-cover"
                     src={equipo.logo_url}
+                    width={80}
+                    height={80}
                   />
                 ) : (
                   <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-slate-300 text-xs text-slate-500">
