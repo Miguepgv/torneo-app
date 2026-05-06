@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -33,6 +33,12 @@ export default function AdminEquipoDetallePage() {
   const [message, setMessage] = useState("");
   const [subiendoLogo, setSubiendoLogo] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  const [miRol, setMiRol] = useState<RolUsuario>(null);
+  const [delegadoCorreo, setDelegadoCorreo] = useState("");
+  const [delegadoTelefono, setDelegadoTelefono] = useState("");
+  const [nuevoDelEmail, setNuevoDelEmail] = useState("");
+  const [nuevoDelTelefono, setNuevoDelTelefono] = useState("");
+  const [guardandoDelegado, setGuardandoDelegado] = useState(false);
 
   async function cargarTodo() {
     setLoading(true);
@@ -46,6 +52,7 @@ export default function AdminEquipoDetallePage() {
       ? await supabase.from("usuarios").select("rol").eq("id", user.id).single()
       : { data: null };
     const rol = (perfil?.rol as RolUsuario) ?? null;
+    setMiRol(rol);
 
     if (!user) {
       setMessage("Debes iniciar sesion para gestionar el equipo.");
@@ -102,6 +109,27 @@ export default function AdminEquipoDetallePage() {
     }
 
     setEquipo(equipoCargado);
+
+    if (equipoCargado.delegado_id) {
+      const { data: delData } = await supabase
+        .from("usuarios")
+        .select("correo,telefono")
+        .eq("id", equipoCargado.delegado_id)
+        .maybeSingle();
+      const row = delData as { correo: string | null; telefono: string | null } | null;
+      const c = row?.correo ?? "";
+      const t = row?.telefono ?? "";
+      setDelegadoCorreo(c);
+      setDelegadoTelefono(t);
+      setNuevoDelEmail(c);
+      setNuevoDelTelefono(t);
+    } else {
+      setDelegadoCorreo("");
+      setDelegadoTelefono("");
+      setNuevoDelEmail("");
+      setNuevoDelTelefono("");
+    }
+
     setLoading(false);
   }
 
@@ -167,6 +195,42 @@ export default function AdminEquipoDetallePage() {
     await cargarTodo();
   }
 
+  async function onActualizarDelegado(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!equipo || miRol !== "admin") return;
+    setGuardandoDelegado(true);
+    setMessage("");
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      setMessage("Sesion caducada. Vuelve a iniciar sesion.");
+      setGuardandoDelegado(false);
+      return;
+    }
+    const res = await fetch("/api/admin/update-delegado", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        equipoId: equipo.id,
+        emailDelegado: nuevoDelEmail.trim(),
+        telefonoDelegado: nuevoDelTelefono.trim(),
+      }),
+    });
+    const json = (await res.json()) as { error?: string; mensaje?: string };
+    if (!res.ok) {
+      setMessage(json.error ?? "No se pudo actualizar el delegado.");
+      setGuardandoDelegado(false);
+      return;
+    }
+    setMessage(json.mensaje ?? "Delegado actualizado.");
+    setGuardandoDelegado(false);
+    await cargarTodo();
+  }
+
   async function copiarEnlaceInscripcion() {
     if (!equipo) return;
     const enlace = `${window.location.origin}/join/${equipo.codigo_inscripcion}`;
@@ -229,6 +293,43 @@ export default function AdminEquipoDetallePage() {
                   />
                 </label>
               </div>
+
+              {miRol === "admin" ? (
+                <section className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <h3 className="font-semibold text-amber-950">Delegado del equipo</h3>
+                  <p className="mt-1 text-sm text-amber-900">
+                    Actual: {delegadoCorreo || "sin delegado"} {delegadoTelefono ? `· ${delegadoTelefono}` : ""}
+                  </p>
+                  <p className="mt-2 text-xs text-amber-800">
+                    Si cambias correo, se invita al nuevo delegado (correo con enlace) y este equipo
+                    pasa a su cuenta.
+                  </p>
+                  <form className="mt-3 grid gap-2 sm:grid-cols-2" onSubmit={onActualizarDelegado}>
+                    <input
+                      className="rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                      placeholder="Correo del delegado"
+                      type="email"
+                      value={nuevoDelEmail}
+                      onChange={(e) => setNuevoDelEmail(e.target.value)}
+                      required
+                    />
+                    <input
+                      className="rounded-lg border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                      placeholder="Telefono del delegado"
+                      value={nuevoDelTelefono}
+                      onChange={(e) => setNuevoDelTelefono(e.target.value)}
+                      required
+                    />
+                    <button
+                      className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 sm:col-span-2"
+                      disabled={guardandoDelegado}
+                      type="submit"
+                    >
+                      {guardandoDelegado ? "Guardando..." : "Guardar delegado"}
+                    </button>
+                  </form>
+                </section>
+              ) : null}
 
               <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
                 Alta de jugadores solo por enlace de equipo:

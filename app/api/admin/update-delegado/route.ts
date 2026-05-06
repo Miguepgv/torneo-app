@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-type CreateTeamPayload = {
-  nombreEquipo?: string;
+type Body = {
+  equipoId?: string;
   emailDelegado?: string;
   telefonoDelegado?: string;
 };
+
+function appBaseUrl(request: NextRequest) {
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  const vercel = process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel}`;
+  const origin = request.headers.get("origin");
+  if (origin) return origin.replace(/\/$/, "");
+  return "http://localhost:3000";
+}
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -42,38 +52,61 @@ export async function POST(request: NextRequest) {
     .eq("id", user.id)
     .single();
   if (roleError || me?.rol !== "admin") {
-    return NextResponse.json({ error: "Solo admin." }, { status: 403 });
+    return NextResponse.json({ error: "Solo admin puede cambiar el delegado." }, { status: 403 });
   }
 
-  const body = (await request.json()) as CreateTeamPayload;
-  const nombreEquipo = (body.nombreEquipo ?? "").trim();
+  const body = (await request.json()) as Body;
+  const equipoId = (body.equipoId ?? "").trim();
   const emailDelegado = (body.emailDelegado ?? "").trim().toLowerCase();
   const telefonoDelegado = (body.telefonoDelegado ?? "").trim();
 
-  if (!nombreEquipo || !emailDelegado || !telefonoDelegado) {
+  if (!equipoId || !emailDelegado || !telefonoDelegado) {
     return NextResponse.json(
-      { error: "Nombre equipo, correo y telefono son obligatorios." },
+      { error: "Equipo, correo y telefono del delegado son obligatorios." },
       { status: 400 },
     );
   }
 
   const adminClient = createClient(url, serviceRoleKey);
+  const base = appBaseUrl(request);
+  const redirectTo = `${base}/login`;
+
+  const { data: team, error: teamErr } = await adminClient
+    .from("equipos")
+    .select("id,delegado_id")
+    .eq("id", equipoId)
+    .single();
+
+  if (teamErr || !team) {
+    return NextResponse.json({ error: "Equipo no encontrado." }, { status: 404 });
+  }
+
+  const { data: targetProfile } = await adminClient
+    .from("usuarios")
+    .select("id,rol")
+    .eq("correo", emailDelegado)
+    .maybeSingle();
+
+  if (targetProfile?.rol === "admin") {
+    return NextResponse.json(
+      { error: "No puedes asignar como delegado a un administrador." },
+      { status: 400 },
+    );
+  }
 
   let delegadoId: string | null = null;
-  const { data: existingUser } = await adminClient
+
+  const { data: existingByMail } = await adminClient
     .from("usuarios")
     .select("id")
     .eq("correo", emailDelegado)
     .maybeSingle();
 
-  if (existingUser?.id) {
-    delegadoId = existingUser.id;
+  if (existingByMail?.id) {
+    delegadoId = existingByMail.id;
   } else {
-    const base =
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
     const invite = await adminClient.auth.admin.inviteUserByEmail(emailDelegado, {
-      redirectTo: `${base}/login`,
+      redirectTo,
       data: { nombre: "Delegado" },
     });
     if (invite.error || !invite.data.user) {
@@ -95,6 +128,7 @@ export async function POST(request: NextRequest) {
     },
     { onConflict: "id" },
   );
+
   if (upsertUserError) {
     return NextResponse.json(
       { error: `No se pudo guardar delegado: ${upsertUserError.message}` },
@@ -102,38 +136,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: codigoData, error: codigoError } = await adminClient.rpc(
-    "generar_codigo_inscripcion",
-    { p_len: 6 },
-  );
-  if (codigoError) {
-    return NextResponse.json(
-      { error: `No se pudo generar codigo: ${codigoError.message}` },
-      { status: 400 },
-    );
-  }
-
-  const codigoInscripcion = typeof codigoData === "string" ? codigoData : "";
-  const { data: team, error: teamError } = await adminClient
+  const { error: updateErr } = await adminClient
     .from("equipos")
-    .insert({
-      nombre: nombreEquipo,
-      codigo_inscripcion: codigoInscripcion,
-      delegado_id: delegadoId,
-    })
-    .select("id,codigo_inscripcion")
-    .single();
+    .update({ delegado_id: delegadoId })
+    .eq("id", equipoId);
 
-  if (teamError) {
+  if (updateErr) {
     return NextResponse.json(
-      { error: `No se pudo crear equipo: ${teamError.message}` },
+      { error: `No se pudo actualizar el equipo: ${updateErr.message}` },
       { status: 400 },
     );
   }
 
   return NextResponse.json({
     ok: true,
-    equipo_id: team.id,
-    codigo_inscripcion: team.codigo_inscripcion,
+    delegado_id: delegadoId,
+    mensaje:
+      "Delegado actualizado. Si es nuevo, recibira correo para definir contrasena.",
   });
 }
