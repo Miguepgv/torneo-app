@@ -35,12 +35,14 @@ export async function POST(request: NextRequest) {
   const codigo = String(form.get("codigo") ?? "").trim().toUpperCase();
   const nombre = String(form.get("nombre") ?? "").trim();
   const apellidos = String(form.get("apellidos") ?? "").trim();
+  const alias = String(form.get("alias") ?? "").trim();
   const fechaNacimiento = String(form.get("fechaNacimiento") ?? "").trim();
   const firma = String(form.get("firma") ?? "").trim();
   const acepta = String(form.get("acepta") ?? "false") === "true";
 
   const dniDelante = form.get("dniDelante") as File | null;
   const dniDetras = form.get("dniDetras") as File | null;
+  const fotoPerfil = form.get("fotoPerfil") as File | null;
   const dniTutorDelante = form.get("dniTutorDelante") as File | null;
   const dniTutorDetras = form.get("dniTutorDetras") as File | null;
 
@@ -61,6 +63,18 @@ export async function POST(request: NextRequest) {
   }
 
   const adminClient = createClient(url, serviceRoleKey);
+  const { data: cfg } = await adminClient
+    .from("configuracion_torneo")
+    .select("limite_cambios_hasta")
+    .limit(1)
+    .maybeSingle();
+  const limite = (cfg as { limite_cambios_hasta?: string | null } | null)?.limite_cambios_hasta;
+  if (limite && new Date(limite).getTime() <= Date.now()) {
+    return NextResponse.json(
+      { error: "El plazo para modificar/inscribir jugadores ya ha finalizado." },
+      { status: 400 },
+    );
+  }
 
   const { data: equipo, error: equipoError } = await adminClient
     .from("equipos")
@@ -73,6 +87,7 @@ export async function POST(request: NextRequest) {
 
   const safeName = `${Date.now()}-${nombre.toLowerCase().replace(/\s+/g, "-")}`;
   const basePath = `inscripciones/${equipo.id}/${safeName}`;
+  const fotoPath = fotoPerfil ? `jugadores/${equipo.id}/${safeName}-perfil` : null;
 
   try {
     await uploadFile(adminClient, "dnis_privados", `${basePath}-dni-delante`, dniDelante);
@@ -80,6 +95,9 @@ export async function POST(request: NextRequest) {
     if (esMenor && dniTutorDelante && dniTutorDetras) {
       await uploadFile(adminClient, "dnis_privados", `${basePath}-tutor-delante`, dniTutorDelante);
       await uploadFile(adminClient, "dnis_privados", `${basePath}-tutor-detras`, dniTutorDetras);
+    }
+    if (fotoPerfil && fotoPath) {
+      await uploadFile(adminClient, "escudos", fotoPath, fotoPerfil);
     }
   } catch (error) {
     return NextResponse.json(
@@ -92,12 +110,16 @@ export async function POST(request: NextRequest) {
     equipo_id: equipo.id,
     nombre,
     apellidos,
+    alias: alias || null,
     dni_delante: `${basePath}-dni-delante`,
     dni_detras: `${basePath}-dni-detras`,
     dni_tutor_delante: esMenor ? `${basePath}-tutor-delante` : null,
     dni_tutor_detras: esMenor ? `${basePath}-tutor-detras` : null,
     es_menor: esMenor,
     fecha_nacimiento: fechaNacimiento,
+    foto_url: fotoPath
+      ? adminClient.storage.from("escudos").getPublicUrl(fotoPath).data.publicUrl
+      : null,
     consentimiento_aceptado: true,
     consentimiento_firma: firma,
     consentimiento_aceptado_at: new Date().toISOString(),

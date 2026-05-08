@@ -20,6 +20,7 @@ type Jugador = {
 
 type Gol = {
   jugador_id: string | null;
+  propia_meta?: boolean | null;
 };
 
 export default function EquipoDetallePage() {
@@ -64,7 +65,7 @@ export default function EquipoDetallePage() {
 
       const { data: goalsData, error: goalsError } = await supabase
         .from("goles")
-        .select("jugador_id")
+        .select("jugador_id,propia_meta")
         .eq("equipo_id", equipoId);
 
       if (goalsError) {
@@ -75,7 +76,7 @@ export default function EquipoDetallePage() {
 
       const resumen: Record<string, number> = {};
       for (const gol of ((goalsData as Gol[]) ?? [])) {
-        if (!gol.jugador_id) continue;
+        if (!gol.jugador_id || gol.propia_meta) continue;
         resumen[gol.jugador_id] = (resumen[gol.jugador_id] ?? 0) + 1;
       }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type Partido = {
@@ -21,8 +21,32 @@ type GolRow = {
   minuto: number | null;
   jugador_id: string | null;
   equipo_id: string | null;
-  jugadores: { nombre: string; apellidos: string } | null;
+  propia_meta?: boolean | null;
+  jugadores: { nombre: string; apellidos: string; foto_url?: string | null } | null;
 };
+
+function JugadorGoalAvatar(props: {
+  fotoUrl: string | null | undefined;
+  nombreCompleto: string;
+}) {
+  const url = props.fotoUrl?.trim();
+  const letter = (props.nombreCompleto || "?").trim().slice(0, 1).toUpperCase();
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="h-10 w-10 shrink-0 rounded-full border border-slate-200 object-cover"
+        loading="lazy"
+      />
+    );
+  }
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-200 text-sm font-bold text-slate-600">
+      {letter}
+    </div>
+  );
+}
 
 export default function ResultadoDetallePage() {
   const params = useParams<{ id: string }>();
@@ -36,10 +60,13 @@ export default function ResultadoDetallePage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setMessage("");
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!partidoId) return;
+
+      const silent = Boolean(opts?.silent);
+      if (!silent) setLoading(true);
+      if (!silent) setMessage("");
 
       const { data: pData, error: pErr } = await supabase
         .from("partidos")
@@ -50,9 +77,11 @@ export default function ResultadoDetallePage() {
         .single();
 
       if (pErr || !pData) {
-        setMessage(`No se encontro el partido: ${pErr?.message ?? ""}`);
+        if (!silent) {
+          setMessage(`No se encontro el partido: ${pErr?.message ?? ""}`);
+        }
         setPartido(null);
-        setLoading(false);
+        if (!silent) setLoading(false);
         return;
       }
 
@@ -69,20 +98,28 @@ export default function ResultadoDetallePage() {
 
       const { data: gData, error: gErr } = await supabase
         .from("goles")
-        .select("id,minuto,jugador_id,equipo_id,jugadores(nombre,apellidos)")
+        .select("id,minuto,jugador_id,equipo_id,propia_meta,jugadores(nombre,apellidos,foto_url)")
         .eq("partido_id", partidoId)
-        .order("minuto", { ascending: true, nullsFirst: false });
+        .order("minuto", { ascending: true, nullsFirst: true })
+        .order("created_at", { ascending: true });
 
       if (gErr) {
-        setMessage(`Error cargando goles: ${gErr.message}`);
+        if (!silent) setMessage(`Error cargando goles: ${gErr.message}`);
         setGoles([]);
       } else {
         setGoles((gData as GolRow[]) ?? []);
       }
-      setLoading(false);
-    }
-    if (partidoId) void load();
-  }, [partidoId, supabase]);
+      if (!silent) setLoading(false);
+    },
+    [partidoId, supabase],
+  );
+
+  useEffect(() => {
+    if (!partidoId) return;
+    void load();
+    const id = window.setInterval(() => void load({ silent: true }), 7000);
+    return () => window.clearInterval(id);
+  }, [partidoId, load]);
 
   return (
     <main className="min-h-screen bg-slate-100 p-8">
@@ -107,6 +144,9 @@ export default function ResultadoDetallePage() {
         {partido ? (
           <>
             <h1 className="text-2xl font-bold text-violet-800">Detalle partido</h1>
+            <p className="mt-1 text-xs text-slate-500">
+              Marcador y goles · se refrescan cada pocos segundos mientras tienes abierta esta pantalla.
+            </p>
             <p className="mt-2 text-xl font-semibold text-slate-900">
               {localNombre} {partido.goles_local ?? 0} — {partido.goles_visitante ?? 0} {visitNombre}
             </p>
@@ -126,16 +166,29 @@ export default function ResultadoDetallePage() {
                 {goles.map((g) => (
                   <li
                     key={g.id}
-                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800"
+                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800"
                   >
-                    <span className="font-medium">
-                      {g.jugadores
-                        ? `${g.jugadores.nombre} ${g.jugadores.apellidos}`
-                        : "Jugador desconocido"}
-                    </span>
-                    {g.minuto != null ? (
-                      <span className="ml-2 text-sm text-slate-600">min {g.minuto}</span>
-                    ) : null}
+                    <JugadorGoalAvatar
+                      fotoUrl={g.jugadores?.foto_url}
+                      nombreCompleto={
+                        g.jugadores ? `${g.jugadores.nombre} ${g.jugadores.apellidos}` : "?"
+                      }
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium">
+                        {g.jugadores
+                          ? `${g.jugadores.nombre} ${g.jugadores.apellidos}`
+                          : "Jugador desconocido"}
+                      </span>
+                      {g.minuto != null ? (
+                        <span className="ml-2 text-sm text-slate-600">min {g.minuto}</span>
+                      ) : null}
+                      {g.propia_meta ? (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">
+                          Propia puerta
+                        </span>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>

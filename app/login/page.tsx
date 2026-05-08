@@ -17,7 +17,7 @@ export default function LoginPage() {
     setMessage("");
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    const cleanPassword = password;
 
     const checkResponse = await fetch("/api/auth/organization-email-exists", {
       method: "POST",

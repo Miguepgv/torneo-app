@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveDelegadoForTeam } from "@/lib/server/resolve-delegado";
 
 type Body = {
   equipoId?: string;
   emailDelegado?: string;
   telefonoDelegado?: string;
+  nombreDelegado?: string;
+  apellidosDelegado?: string;
+  fotoDelegadoUrl?: string | null;
 };
 
 function appBaseUrl(request: NextRequest) {
+  const origin = request.headers.get("origin")?.replace(/\/$/, "") ?? "";
+  /** En local, el Origin del navegador debe mandar el redirect (evita fallo Auth si .env apunta a Vercel). */
+  if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+    return origin;
+  }
   const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
   if (fromEnv) return fromEnv;
   const vercel = process.env.VERCEL_URL;
   if (vercel) return `https://${vercel}`;
-  const origin = request.headers.get("origin");
-  if (origin) return origin.replace(/\/$/, "");
+  if (origin) return origin;
   return "http://localhost:3000";
 }
 
@@ -59,6 +67,9 @@ export async function POST(request: NextRequest) {
   const equipoId = (body.equipoId ?? "").trim();
   const emailDelegado = (body.emailDelegado ?? "").trim().toLowerCase();
   const telefonoDelegado = (body.telefonoDelegado ?? "").trim();
+  const nombreDelegado = body.nombreDelegado ?? "";
+  const apellidosDelegado = body.apellidosDelegado ?? "";
+  const fotoDelegadoUrl = body.fotoDelegadoUrl?.trim() || null;
 
   if (!equipoId || !emailDelegado || !telefonoDelegado) {
     return NextResponse.json(
@@ -69,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   const adminClient = createClient(url, serviceRoleKey);
   const base = appBaseUrl(request);
-  const redirectTo = `${base}/login`;
+  const setPasswordRedirect = `${base}/reset-password`;
 
   const { data: team, error: teamErr } = await adminClient
     .from("equipos")
@@ -81,60 +92,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Equipo no encontrado." }, { status: 404 });
   }
 
-  const { data: targetProfile } = await adminClient
-    .from("usuarios")
-    .select("id,rol")
-    .eq("correo", emailDelegado)
-    .maybeSingle();
-
-  if (targetProfile?.rol === "admin") {
-    return NextResponse.json(
-      { error: "No puedes asignar como delegado a un administrador." },
-      { status: 400 },
-    );
-  }
-
-  let delegadoId: string | null = null;
-
-  const { data: existingByMail } = await adminClient
-    .from("usuarios")
-    .select("id")
-    .eq("correo", emailDelegado)
-    .maybeSingle();
-
-  if (existingByMail?.id) {
-    delegadoId = existingByMail.id;
-  } else {
-    const invite = await adminClient.auth.admin.inviteUserByEmail(emailDelegado, {
-      redirectTo,
-      data: { nombre: "Delegado" },
-    });
-    if (invite.error || !invite.data.user) {
-      return NextResponse.json(
-        { error: invite.error?.message ?? "No se pudo invitar al delegado." },
-        { status: 400 },
-      );
-    }
-    delegadoId = invite.data.user.id;
-  }
-
-  const { error: upsertUserError } = await adminClient.from("usuarios").upsert(
+  const resolved = await resolveDelegadoForTeam(
+    adminClient,
+    emailDelegado,
+    telefonoDelegado,
+    nombreDelegado,
+    apellidosDelegado,
+    fotoDelegadoUrl,
     {
-      id: delegadoId,
-      correo: emailDelegado,
-      telefono: telefonoDelegado,
-      rol: "delegado",
-      nombre: emailDelegado.split("@")[0],
+      setPasswordRedirect,
+      supabaseUrl: url,
+      anonKey: anonKey,
     },
-    { onConflict: "id" },
   );
-
-  if (upsertUserError) {
-    return NextResponse.json(
-      { error: `No se pudo guardar delegado: ${upsertUserError.message}` },
-      { status: 400 },
-    );
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
   }
+
+  const delegadoId = resolved.data.delegadoId;
 
   const { error: updateErr } = await adminClient
     .from("equipos")
@@ -148,10 +123,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { invitedNewUser, accessEmailSent, emailError } = resolved.data;
+  let mensaje = "Delegado actualizado.";
+  if (invitedNewUser) {
+    mensaje =
+      "Delegado actualizado. Si el delegado es nuevo, Supabase debe enviar la invitacion (revisa spam y SMTP).";
+  } else if (accessEmailSent) {
+    mensaje =
+      "Delegado actualizado. Se envio el enlace por correo (revisa spam).";
+  } else {
+    mensaje =
+      "Delegado guardado pero el correo NO se envio. Mira el detalle de error abajo (redirect URL o SMTP).";
+  }
+
   return NextResponse.json({
     ok: true,
     delegado_id: delegadoId,
-    mensaje:
-      "Delegado actualizado. Si es nuevo, recibira correo para definir contrasena.",
+    invited_new_user: invitedNewUser,
+    access_email_sent: accessEmailSent,
+    email_error: emailError,
+    redirect_usado: setPasswordRedirect,
+    mensaje,
   });
 }

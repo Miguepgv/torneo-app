@@ -19,9 +19,11 @@ export default function JoinByCodePage() {
 
   const [nombre, setNombre] = useState("");
   const [apellidos, setApellidos] = useState("");
+  const [alias, setAlias] = useState("");
   const [fechaNacimiento, setFechaNacimiento] = useState("");
   const [dniDelante, setDniDelante] = useState<File | null>(null);
   const [dniDetras, setDniDetras] = useState<File | null>(null);
+  const [fotoPerfil, setFotoPerfil] = useState<File | null>(null);
   const [dniTutorDelante, setDniTutorDelante] = useState<File | null>(null);
   const [dniTutorDetras, setDniTutorDetras] = useState<File | null>(null);
   const [firma, setFirma] = useState("");
@@ -54,11 +56,13 @@ export default function JoinByCodePage() {
     formData.append("codigo", codigo);
     formData.append("nombre", nombre);
     formData.append("apellidos", apellidos);
+    formData.append("alias", alias);
     formData.append("fechaNacimiento", fechaNacimiento);
     formData.append("firma", firma);
     formData.append("acepta", "true");
     formData.append("dniDelante", dniDelante);
     formData.append("dniDetras", dniDetras);
+    if (fotoPerfil) formData.append("fotoPerfil", fotoPerfil);
     if (dniTutorDelante) formData.append("dniTutorDelante", dniTutorDelante);
     if (dniTutorDetras) formData.append("dniTutorDetras", dniTutorDetras);
 
@@ -105,6 +109,12 @@ export default function JoinByCodePage() {
           />
           <input
             className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
+            placeholder="Alias (opcional)"
+            value={alias}
+            onChange={(event) => setAlias(event.target.value)}
+          />
+          <input
+            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
             type="date"
             value={fechaNacimiento}
             onChange={(event) => setFechaNacimiento(event.target.value)}
@@ -128,6 +138,19 @@ export default function JoinByCodePage() {
             onChange={(event) => setDniDetras(event.target.files?.[0] ?? null)}
             required
           />
+
+          <label className="text-sm font-semibold text-slate-700">
+            Foto de perfil (cara, tipo ficha)
+          </label>
+          <input
+            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
+            type="file"
+            accept="image/*"
+            onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
+          />
+          <p className="text-xs text-slate-600">
+            Sube una foto de la cara, como para ficha de jugador.
+          </p>
 
           {esMenor ? (
             <>

@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type GolRow = {
   jugador_id: string | null;
+  propia_meta?: boolean | null;
   jugadores: { nombre: string; apellidos: string } | null;
   equipos: { nombre: string } | null;
 };
@@ -22,8 +22,9 @@ export default function GoleadoresPage() {
     async function load() {
       const { data, error } = await supabase
         .from("goles")
-        .select("jugador_id,jugadores(nombre,apellidos),equipos(nombre)")
-        .not("jugador_id", "is", null);
+        .select("jugador_id,propia_meta,jugadores(nombre,apellidos),equipos(nombre)")
+        .not("jugador_id", "is", null)
+        .not("propia_meta", "eq", true);
 
       if (error) {
         setMessage(`Error cargando goles: ${error.message}`);
@@ -35,7 +36,7 @@ export default function GoleadoresPage() {
       const conteo: Record<string, { nombre: string; equipo: string; goles: number }> = {};
       for (const row of (data as GolRow[]) ?? []) {
         const jid = row.jugador_id;
-        if (!jid) continue;
+        if (!jid || row.propia_meta) continue;
         const nombreJ =
           row.jugadores != null
             ? `${row.jugadores.nombre} ${row.jugadores.apellidos}`
@@ -55,16 +56,10 @@ export default function GoleadoresPage() {
   }, [supabase]);
 
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
-      <div className="mx-auto w-full max-w-2xl rounded-2xl bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-violet-800">Goleadores</h1>
-          <Link
-            className="rounded-lg border border-violet-300 px-4 py-2 text-sm font-semibold text-violet-700"
-            href="/"
-          >
-            Inicio
-          </Link>
+    <main className="min-h-screen bg-gradient-to-b from-slate-100 to-violet-50/30 p-4 pb-14 sm:p-8">
+      <div className="mx-auto w-full max-w-2xl rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xl sm:p-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-violet-900">Goleadores</h1>
         </div>
 
         {loading ? <p>Cargando...</p> : null}

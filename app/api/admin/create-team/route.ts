@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveDelegadoForTeam } from "@/lib/server/resolve-delegado";
 
 type CreateTeamPayload = {
   nombreEquipo?: string;
   emailDelegado?: string;
   telefonoDelegado?: string;
+  nombreDelegado?: string;
+  apellidosDelegado?: string;
+  fotoDelegadoUrl?: string | null;
 };
+
+function appBaseUrl(request: NextRequest) {
+  const origin = request.headers.get("origin")?.replace(/\/$/, "") ?? "";
+  if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+    return origin;
+  }
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  const vercel = process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel}`;
+  if (origin) return origin;
+  return "http://localhost:3000";
+}
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -49,6 +66,9 @@ export async function POST(request: NextRequest) {
   const nombreEquipo = (body.nombreEquipo ?? "").trim();
   const emailDelegado = (body.emailDelegado ?? "").trim().toLowerCase();
   const telefonoDelegado = (body.telefonoDelegado ?? "").trim();
+  const nombreDelegado = body.nombreDelegado ?? "";
+  const apellidosDelegado = body.apellidosDelegado ?? "";
+  const fotoDelegadoUrl = body.fotoDelegadoUrl?.trim() || null;
 
   if (!nombreEquipo || !emailDelegado || !telefonoDelegado) {
     return NextResponse.json(
@@ -58,49 +78,27 @@ export async function POST(request: NextRequest) {
   }
 
   const adminClient = createClient(url, serviceRoleKey);
+  const base = appBaseUrl(request);
+  const setPasswordRedirect = `${base}/reset-password`;
 
-  let delegadoId: string | null = null;
-  const { data: existingUser } = await adminClient
-    .from("usuarios")
-    .select("id")
-    .eq("correo", emailDelegado)
-    .maybeSingle();
-
-  if (existingUser?.id) {
-    delegadoId = existingUser.id;
-  } else {
-    const base =
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const invite = await adminClient.auth.admin.inviteUserByEmail(emailDelegado, {
-      redirectTo: `${base}/login`,
-      data: { nombre: "Delegado" },
-    });
-    if (invite.error || !invite.data.user) {
-      return NextResponse.json(
-        { error: invite.error?.message ?? "No se pudo invitar al delegado." },
-        { status: 400 },
-      );
-    }
-    delegadoId = invite.data.user.id;
-  }
-
-  const { error: upsertUserError } = await adminClient.from("usuarios").upsert(
+  const resolved = await resolveDelegadoForTeam(
+    adminClient,
+    emailDelegado,
+    telefonoDelegado,
+    nombreDelegado,
+    apellidosDelegado,
+    fotoDelegadoUrl,
     {
-      id: delegadoId,
-      correo: emailDelegado,
-      telefono: telefonoDelegado,
-      rol: "delegado",
-      nombre: emailDelegado.split("@")[0],
+      setPasswordRedirect,
+      supabaseUrl: url,
+      anonKey: anonKey,
     },
-    { onConflict: "id" },
   );
-  if (upsertUserError) {
-    return NextResponse.json(
-      { error: `No se pudo guardar delegado: ${upsertUserError.message}` },
-      { status: 400 },
-    );
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
   }
+
+  const delegadoId = resolved.data.delegadoId;
 
   const { data: codigoData, error: codigoError } = await adminClient.rpc(
     "generar_codigo_inscripcion",
@@ -135,5 +133,9 @@ export async function POST(request: NextRequest) {
     ok: true,
     equipo_id: team.id,
     codigo_inscripcion: team.codigo_inscripcion,
+    invited_new_user: resolved.data.invitedNewUser,
+    access_email_sent: resolved.data.accessEmailSent,
+    email_error: resolved.data.emailError,
+    redirect_usado: setPasswordRedirect,
   });
 }
