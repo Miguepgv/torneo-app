@@ -76,8 +76,20 @@ export default function LoginPage() {
 
   async function onForgotPassword() {
     setMessage("");
-    if (!email.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
       setMessage("Escribe tu correo y pulsa de nuevo.");
+      return;
+    }
+
+    const checkResponse = await fetch("/api/auth/organization-email-exists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: cleanEmail }),
+    });
+    const checkResult = (await checkResponse.json().catch(() => ({}))) as { exists?: boolean };
+    if (!checkResponse.ok || !checkResult.exists) {
+      setMessage("Ese usuario no tiene acceso a la configuracion del torneo.");
       return;
     }
 
@@ -86,7 +98,7 @@ export default function LoginPage() {
         ? `${window.location.origin}/reset-password`
         : undefined;
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
       redirectTo,
     });
 

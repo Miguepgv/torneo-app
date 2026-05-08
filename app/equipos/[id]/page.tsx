@@ -16,6 +16,7 @@ type Jugador = {
   nombre: string;
   apellidos: string;
   alias: string | null;
+  foto_url?: string | null;
 };
 
 type Gol = {
@@ -53,7 +54,7 @@ export default function EquipoDetallePage() {
 
       const { data: playersData, error: playersError } = await supabase
         .from("jugadores")
-        .select("id,nombre,apellidos,alias")
+        .select("id,nombre,apellidos,alias,foto_url")
         .eq("equipo_id", equipoId)
         .order("nombre", { ascending: true });
 
@@ -128,11 +129,26 @@ export default function EquipoDetallePage() {
               <div className="grid gap-2">
                 {jugadores.map((jugador) => (
                   <div key={jugador.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {jugador.nombre} {jugador.apellidos}
-                      </p>
-                      <p className="text-sm text-slate-600">Alias: {jugador.alias || "-"}</p>
+                    <div className="flex items-center gap-3">
+                      {jugador.foto_url ? (
+                        <Image
+                          src={jugador.foto_url}
+                          alt={`${jugador.nombre} ${jugador.apellidos}`}
+                          width={44}
+                          height={44}
+                          className="h-11 w-11 rounded-full border border-slate-200 object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-500">
+                          {(jugador.nombre || "?").slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {jugador.nombre} {jugador.apellidos}
+                        </p>
+                        <p className="text-sm text-slate-600">Alias: {jugador.alias || "-"}</p>
+                      </div>
                     </div>
                     <span className="rounded-full bg-violet-100 px-3 py-1 text-sm font-semibold text-violet-800">
                       Goles: {golesPorJugador[jugador.id] ?? 0}

@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const CACHE_NAME = "maraton-cofrade-v1";
+const CACHE_NAME = "maraton-cofrade-v2";
 const OFFLINE_URL = "/offline.html";
 const CORE_ASSETS = [
   "/",
@@ -41,6 +41,15 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Nunca cachear API ni rutas dinámicas de Next/admin.
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/admin") ||
+    url.pathname.startsWith("/_next/data/")
+  ) {
+    return;
+  }
+
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request).catch(async () => {
@@ -49,6 +58,16 @@ self.addEventListener("fetch", (event) => {
         return fallback || Response.error();
       }),
     );
+    return;
+  }
+
+  // Solo cacheamos estáticos habituales (iconos, css, js, imágenes, etc.).
+  const isStaticAsset =
+    url.pathname === "/manifest.webmanifest" ||
+    url.pathname === "/apple-icon" ||
+    url.pathname.startsWith("/pwa-icon-") ||
+    /\.(?:css|js|mjs|png|jpg|jpeg|gif|webp|svg|ico|woff2?)$/i.test(url.pathname);
+  if (!isStaticAsset) {
     return;
   }
 

@@ -446,7 +446,7 @@ function BracketSubtree(props: {
   }
   if (node.kind === "single") {
     return (
-      <div className="flex flex-row flex-wrap items-center gap-y-8 sm:flex-nowrap sm:gap-2">
+      <div className="flex flex-row flex-nowrap items-center gap-2">
         <BracketSubtree node={node.child} theme={theme} teamNames={teamNames} hints={hints} />
         <div className="flex min-h-[3.75rem] w-10 shrink-0 self-stretch sm:w-14">
           <BracketForkSvg variant="single" />
@@ -456,7 +456,7 @@ function BracketSubtree(props: {
     );
   }
   return (
-    <div className="flex flex-row flex-wrap items-center gap-y-8 sm:flex-nowrap sm:gap-2">
+    <div className="flex flex-row flex-nowrap items-center gap-2">
       <div className="flex shrink-0 flex-col justify-evenly gap-14 py-12 sm:gap-24 sm:py-16">
         <BracketSubtree node={node.up} theme={theme} teamNames={teamNames} hints={hints} />
         <BracketSubtree node={node.down} theme={theme} teamNames={teamNames} hints={hints} />
@@ -919,7 +919,7 @@ export default function ClasificacionesPage() {
                     <div className={`border-t p-4 ${theme.roundCol}`}>
                       {tree ? (
                         <div className="overflow-x-auto pb-2">
-                          <div className="inline-block rounded-2xl border border-black/10 bg-white/80 p-4 shadow-inner backdrop-blur-sm">
+                          <div className="inline-block min-w-max rounded-2xl border border-black/10 bg-white/80 p-4 shadow-inner backdrop-blur-sm">
                             <BracketSubtree
                               node={tree}
                               theme={theme}

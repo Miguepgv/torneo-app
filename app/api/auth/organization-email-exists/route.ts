@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   const adminClient = createClient(url, serviceRoleKey);
   const { data, error } = await adminClient
     .from("usuarios")
-    .select("id")
+    .select("id,rol")
     .eq("correo", email)
     .maybeSingle();
 
@@ -30,5 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  return NextResponse.json({ exists: Boolean(data?.id) });
+  const rol = (data as { rol?: string } | null)?.rol ?? "";
+  const allowed = rol === "admin" || rol === "delegado" || rol === "director_campo";
+  return NextResponse.json({ exists: Boolean(data?.id) && allowed });
 }

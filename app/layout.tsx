@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { PwaRegister } from "@/components/PwaRegister";
 import { SiteNav } from "@/components/SiteNav";
 import "./globals.css";
@@ -43,6 +44,31 @@ export default function RootLayout({
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <Script id="localhost-sw-reset" strategy="beforeInteractive">{`
+          (function () {
+            try {
+              var host = window.location.hostname;
+              var isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+              if (!isLocal || !("serviceWorker" in navigator)) return;
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              }).then(function () {
+                if (!("caches" in window)) return;
+                return caches.keys().then(function (keys) {
+                  return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+                });
+              }).finally(function () {
+                var key = "__sw_reset_once__";
+                if (!sessionStorage.getItem(key)) {
+                  sessionStorage.setItem(key, "1");
+                  window.location.reload();
+                }
+              });
+            } catch (e) {}
+          })();
+        `}</Script>
+      </head>
       <body className="min-h-full flex flex-col bg-slate-100">
         <PwaRegister />
         <SiteNav />

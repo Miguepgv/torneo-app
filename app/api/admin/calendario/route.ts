@@ -46,7 +46,7 @@ type Body =
   | { action: "delete_pista"; id?: string }
   | { action: "set_estado"; id?: string; estado?: string };
 
-async function ensureAdmin(request: NextRequest) {
+async function ensureStaff(request: NextRequest) {
   const token = (request.headers.get("authorization") ?? "").replace("Bearer ", "");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -62,8 +62,11 @@ async function ensureAdmin(request: NextRequest) {
   } = await userClient.auth.getUser();
   if (!user) return { ok: false as const, error: "Sesion invalida." };
   const { data: me } = await userClient.from("usuarios").select("rol").eq("id", user.id).single();
-  if (me?.rol !== "admin") return { ok: false as const, error: "Solo admin." };
-  return { ok: true as const, admin: createClient(url, serviceRoleKey) };
+  const rol = (me?.rol as string | undefined) ?? "";
+  if (rol !== "admin" && rol !== "director_campo") {
+    return { ok: false as const, error: "Sin permisos." };
+  }
+  return { ok: true as const, admin: createClient(url, serviceRoleKey), rol };
 }
 
 function roundRobin(ids: string[]) {
@@ -164,8 +167,9 @@ function allocateBracketSlots(
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await ensureAdmin(request);
+  const auth = await ensureStaff(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
+  if (auth.rol !== "admin") return NextResponse.json({ error: "Solo admin." }, { status: 403 });
   const { admin } = auth;
   const [{ data: equipos, error: eErr }, { data: partidos, error: pErr }, { data: pistas, error: piErr }, { data: config, error: cErr }] = await Promise.all([
     admin.from("equipos").select("id,nombre,grupo").order("nombre"),
@@ -184,10 +188,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await ensureAdmin(request);
+  const auth = await ensureStaff(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   const { admin } = auth;
   const body = (await request.json()) as Body;
+  if (auth.rol !== "admin" && body.action !== "set_estado") {
+    return NextResponse.json({ error: "Solo admin puede hacer esta accion." }, { status: 403 });
+  }
 
   if (body.action === "generate_groups") {
     const { data: equipos, error } = await admin.from("equipos").select("id,grupo").not("grupo", "is", null);

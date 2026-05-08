@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
 type PartidoLive = {
   id: string;
   estado: string | null;
@@ -34,6 +39,12 @@ export default function Home() {
   const [nombres, setNombres] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [rol, setRol] = useState<string | null>(null);
+  const [showLoginHelp, setShowLoginHelp] = useState(false);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [isIos, setIsIos] = useState(false);
 
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
@@ -79,6 +90,46 @@ export default function Home() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  useEffect(() => {
+    async function loadRole() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setRol(null);
+        return;
+      }
+      const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).single();
+      setRol((data?.rol as string | undefined) ?? null);
+    }
+    void loadRole();
+  }, [supabase]);
+
+  useEffect(() => {
+    const ua = navigator.userAgent.toLowerCase();
+    const ios = /iphone|ipad|ipod/.test(ua);
+    setIsIos(ios);
+    setIsStandalone(window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true);
+
+    const onBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    };
+  }, []);
+
+  async function instalarApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") {
+      setInstallPrompt(null);
+    }
+  }
+
   const enDirecto = useMemo(
     () => partidos.filter((p) => (p.estado ?? "").toLowerCase() === "jugandose"),
     [partidos],
@@ -93,8 +144,8 @@ export default function Home() {
           <h1 className="mt-2 text-4xl font-black tracking-tight text-white drop-shadow-md sm:text-5xl">
             2026
           </h1>
-          <p className="mt-4 max-w-xl mx-auto text-base text-violet-100">
-            Marcadores actualizados en vivo, clasificación, equipos y goleadores. Lo que marca el equipo de campo aparece aquí cada pocos segundos.
+          <p className="mt-4 text-xl font-extrabold uppercase tracking-[0.08em] text-violet-100 sm:text-2xl">
+            30 ANIVERSARIO
           </p>
         </div>
       </div>
@@ -114,7 +165,7 @@ export default function Home() {
           {loading ? <p className="text-slate-500">Cargando partidos…</p> : null}
           {err ? <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{err}</p> : null}
 
-          {!loading && enDirecto.length === 0 && resto.length === 0 ? (
+          {!loading && enDirecto.length === 0 && partidos.length === 0 ? (
             <p className="rounded-xl bg-slate-50 p-6 text-center text-slate-600">Todavía no hay partidos en el sistema.</p>
           ) : null}
 
@@ -165,7 +216,14 @@ export default function Home() {
 
         <section>
           <h2 className="mb-4 text-lg font-bold text-slate-800">Accesos rápidos</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Link
+              href="/clasificaciones"
+              className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-600 to-indigo-700 p-5 text-white shadow-lg transition hover:scale-[1.02] hover:shadow-xl"
+            >
+              <p className="text-sm font-semibold text-violet-100">Clasificación</p>
+              <p className="mt-1 text-lg font-bold">Grupos y cuadros</p>
+            </Link>
             <Link
               href="/resultados"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-md transition hover:border-violet-300 hover:shadow-lg"
@@ -190,18 +248,99 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6">
-          <Link
-            href="/login"
-            className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-          >
-            Login organización
-          </Link>
-          <Link href="/admin" className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-            Panel admin
-          </Link>
-        </section>
+        {rol ? (
+          <section className="flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6">
+            {rol === "delegado" ? (
+              <Link href="/admin/equipos" className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+                Mi equipo
+              </Link>
+            ) : null}
+            {rol === "admin" || rol === "director_campo" ? (
+              <Link href="/admin" className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+                Panel admin
+              </Link>
+            ) : null}
+          </section>
+        ) : null}
       </div>
+
+      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2">
+        <button
+          type="button"
+          className="rounded-full border border-indigo-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-indigo-800 shadow-lg hover:bg-indigo-50"
+          onClick={() => setShowInstallHelp(true)}
+        >
+          Instalar app
+        </button>
+        <button
+          type="button"
+          className="rounded-full border border-violet-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-violet-800 shadow-lg hover:bg-violet-50"
+          onClick={() => setShowLoginHelp(true)}
+        >
+          Login
+        </button>
+      </div>
+      {showInstallHelp ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-indigo-900">Instalar aplicación</h3>
+            {isStandalone ? (
+              <p className="mt-2 rounded-lg bg-emerald-100 px-3 py-2 text-sm font-semibold text-emerald-900">
+                Ya la tienes abierta como app instalada.
+              </p>
+            ) : null}
+            <div className="mt-2 space-y-2 text-sm text-slate-700">
+              <p><strong>Android:</strong> botón Instalar o menú ⋮ → Añadir a pantalla de inicio.</p>
+              <p><strong>Windows:</strong> botón Instalar o icono de instalación en la barra.</p>
+              <p><strong>iPhone/iPad:</strong> Safari → Compartir → Añadir a pantalla de inicio.</p>
+            </div>
+            {!isStandalone && installPrompt ? (
+              <button
+                type="button"
+                onClick={() => void instalarApp()}
+                className="mt-4 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+              >
+                Instalar ahora (Android / Windows)
+              </button>
+            ) : null}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                onClick={() => setShowInstallHelp(false)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showLoginHelp ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-violet-900">Acceso restringido</h3>
+            <p className="mt-2 text-sm text-slate-700">
+              Solo pueden iniciar sesion los delegados y organizadores del torneo.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                onClick={() => setShowLoginHelp(false)}
+              >
+                Cerrar
+              </button>
+              <Link
+                href="/login"
+                className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white"
+                onClick={() => setShowLoginHelp(false)}
+              >
+                Ir a login
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

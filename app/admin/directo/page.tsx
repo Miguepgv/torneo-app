@@ -132,6 +132,8 @@ function cardGlyph(tipo: string) {
 
 export default function AdminDirectoPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [rol, setRol] = useState<string | null>(null);
+  const [checkingRole, setCheckingRole] = useState(true);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [equipos, setEquipos] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
@@ -147,6 +149,11 @@ export default function AdminDirectoPage() {
   const [goalModo, setGoalModo] = useState<"normal" | "pp">("normal");
   const [goalJugadorId, setGoalJugadorId] = useState<string>("");
   const [goalMinuto, setGoalMinuto] = useState<string>("");
+  const [dcEmail, setDcEmail] = useState("");
+  const [dcNombre, setDcNombre] = useState("");
+  const [dcApellidos, setDcApellidos] = useState("");
+  const [dcTelefono, setDcTelefono] = useState("");
+  const [dcLoading, setDcLoading] = useState(false);
 
   const expandedIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -177,8 +184,25 @@ export default function AdminDirectoPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    async function loadRoleAndData() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setRol(null);
+        setCheckingRole(false);
+        return;
+      }
+      const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).single();
+      const r = (data?.rol as string | undefined) ?? null;
+      setRol(r);
+      setCheckingRole(false);
+      if (r === "admin" || r === "director_campo") {
+        await load();
+      }
+    }
+    void loadRoleAndData();
+  }, [supabase]);
 
   const fetchLiveDetail = useCallback(
     async (partidoId: string) => {
@@ -192,7 +216,7 @@ export default function AdminDirectoPage() {
       setMsg("");
       const token = await getToken();
       if (!token) {
-        setMsg("No hay sesion: entra como administrador para usar Directo.");
+        setMsg("No hay sesion: entra como organizador para usar Directo.");
         setLiveLoading(false);
         return;
       }
@@ -256,6 +280,50 @@ export default function AdminDirectoPage() {
     if (expandedId) void fetchLiveDetail(expandedId);
   }, [expandedId, fetchLiveDetail]);
 
+  async function onCreateDirectorCampo() {
+    setMsg("");
+    if (!dcEmail.trim() || !dcNombre.trim()) {
+      setMsg("Para crear director de campo necesitas al menos correo y nombre.");
+      return;
+    }
+    setDcLoading(true);
+    const token = await getToken();
+    if (!token) {
+      setMsg("Sesion caducada.");
+      setDcLoading(false);
+      return;
+    }
+    const res = await fetch("/api/admin/create-director-campo", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        email: dcEmail.trim().toLowerCase(),
+        nombre: dcNombre.trim(),
+        apellidos: dcApellidos.trim(),
+        telefono: dcTelefono.trim(),
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string; access_email_sent?: boolean };
+    if (!res.ok) {
+      setMsg(json.error ?? "No se pudo crear el director de campo.");
+      setDcLoading(false);
+      return;
+    }
+    setMsg(
+      json.access_email_sent
+        ? "Director de campo creado. Se envio correo para definir contrasena."
+        : "Director creado, pero no se pudo enviar correo automatico.",
+    );
+    setDcEmail("");
+    setDcNombre("");
+    setDcApellidos("");
+    setDcTelefono("");
+    setDcLoading(false);
+  }
+
   useEffect(() => {
     if (!goalModal) {
       setGoalJugadorId("");
@@ -303,7 +371,7 @@ export default function AdminDirectoPage() {
     setMsg("");
     const token = await getToken();
     if (!token) {
-      setMsg("No hay sesion: entra como administrador para usar Directo.");
+      setMsg("No hay sesion: entra como organizador para usar Directo.");
       return false;
     }
     const res = await fetch("/api/admin/calendario", {
@@ -496,29 +564,60 @@ export default function AdminDirectoPage() {
     return [...jugadoresLocal, ...jugadoresVisitante].filter((j) => j.equipo_id === team);
   }, [goalModal, goalModo, jugadoresLocal, jugadoresVisitante]);
 
+  if (checkingRole) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-600">Comprobando permisos...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!rol || (rol !== "admin" && rol !== "director_campo")) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            No tienes acceso a Directo. Esta seccion es solo para admin y director de campo.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
+    <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {rol === "admin" ? (
+            <a
+              className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm"
+              href="/admin/equipos"
+            >
+              Equipos
+            </a>
+          ) : null}
+          {rol === "admin" ? (
+            <a
+              className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm"
+              href="/admin/configuracion"
+            >
+              Configuracion torneo
+            </a>
+          ) : null}
+          {rol === "admin" ? (
+            <a
+              className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm"
+              href="/admin/calendario"
+            >
+              Calendario
+            </a>
+          ) : null}
           <a
-            className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700"
-            href="/admin/equipos"
+            className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white sm:px-3 sm:py-2 sm:text-sm"
+            href="/admin/directo"
           >
-            Equipos
-          </a>
-          <a
-            className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700"
-            href="/admin/configuracion"
-          >
-            Configuracion torneo
-          </a>
-          <a
-            className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700"
-            href="/admin/calendario"
-          >
-            Calendario
-          </a>
-          <a className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white" href="/admin/directo">
             Directo
           </a>
         </div>
@@ -530,6 +629,29 @@ export default function AdminDirectoPage() {
             <strong>TA / DA / TR / Agr</strong>. Abajo verás el hilo cronológico del partido.
           </p>
         </div>
+
+        {rol === "admin" ? (
+          <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+            <h2 className="text-base font-bold text-violet-900">Alta de director de campo</h2>
+            <p className="mt-1 text-xs text-violet-800">
+              Crea acceso para editar marcadores en directo. Se enviara email para definir contrasena.
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Correo" type="email" value={dcEmail} onChange={(e) => setDcEmail(e.target.value)} />
+              <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Nombre" value={dcNombre} onChange={(e) => setDcNombre(e.target.value)} />
+              <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Apellidos (opcional)" value={dcApellidos} onChange={(e) => setDcApellidos(e.target.value)} />
+              <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Telefono (opcional)" value={dcTelefono} onChange={(e) => setDcTelefono(e.target.value)} />
+            </div>
+            <button
+              type="button"
+              onClick={() => void onCreateDirectorCampo()}
+              disabled={dcLoading}
+              className="mt-3 rounded-lg bg-violet-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {dcLoading ? "Creando..." : "Crear director de campo"}
+            </button>
+          </section>
+        ) : null}
 
         <div className="grid gap-4">
           {partidos.map((p) => {

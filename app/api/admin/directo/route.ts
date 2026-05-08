@@ -17,7 +17,7 @@ type Body =
     }
   | { action: "remove_tarjeta"; tarjeta_id?: string };
 
-async function ensureAdmin(request: NextRequest) {
+async function ensureStaff(request: NextRequest) {
   const token = (request.headers.get("authorization") ?? "").replace("Bearer ", "");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -33,7 +33,9 @@ async function ensureAdmin(request: NextRequest) {
   } = await userClient.auth.getUser();
   if (!user) return { ok: false as const, error: "Sesion invalida." };
   const { data: me } = await userClient.from("usuarios").select("rol").eq("id", user.id).single();
-  if (me?.rol !== "admin") return { ok: false as const, error: "Solo admin." };
+  if (me?.rol !== "admin" && me?.rol !== "director_campo") {
+    return { ok: false as const, error: "Solo admin o director de campo." };
+  }
   return { ok: true as const, admin: createClient(url, serviceRoleKey) };
 }
 
@@ -160,7 +162,7 @@ async function recalcPartidoStats(admin: SupabaseClient, partidoId: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await ensureAdmin(request);
+  const auth = await ensureStaff(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   const { admin } = auth;
   const partidoId = request.nextUrl.searchParams.get("partido_id");
@@ -264,7 +266,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await ensureAdmin(request);
+  const auth = await ensureStaff(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 401 });
   const { admin } = auth;
   const body = (await request.json()) as Body;

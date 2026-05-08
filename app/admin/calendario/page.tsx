@@ -50,6 +50,8 @@ function formatDayMonthInput(raw: string) {
 
 export default function AdminCalendarioPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [rol, setRol] = useState<string | null>(null);
+  const [checkingRole, setCheckingRole] = useState(true);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [pistas, setPistas] = useState<Pista[]>([]);
   const [cfg, setCfg] = useState<Config | null>(null);
@@ -130,8 +132,23 @@ export default function AdminCalendarioPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    async function roleGuardAndLoad() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setRol(null);
+        setCheckingRole(false);
+        return;
+      }
+      const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).single();
+      const r = (data?.rol as string | undefined) ?? null;
+      setRol(r);
+      setCheckingRole(false);
+      if (r === "admin") await load();
+    }
+    void roleGuardAndLoad();
+  }, [supabase]);
 
   async function onGenerate() {
     try {
@@ -352,23 +369,44 @@ export default function AdminCalendarioPage() {
     });
   }
 
+  if (checkingRole) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-600">Comprobando permisos...</p>
+        </div>
+      </main>
+    );
+  }
+  if (rol !== "admin") {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            Esta seccion solo esta disponible para administradores.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
+    <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-sm">
-        <div className="flex gap-2">
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/equipos">Equipos</a>
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/configuracion">Configuracion torneo</a>
-          <a className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white" href="/admin/calendario">Calendario</a>
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/directo">Directo</a>
+        <div className="flex flex-wrap gap-2">
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/equipos">Equipos</a>
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/configuracion">Configuracion torneo</a>
+          <a className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white sm:px-3 sm:py-2 sm:text-sm" href="/admin/calendario">Calendario</a>
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/directo">Directo</a>
         </div>
 
         <h1 className="text-2xl font-bold text-violet-800">Calendario</h1>
 
-        <div className="flex gap-2">
-          <button className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "calendario" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("calendario")} type="button">
+        <div className="flex flex-wrap gap-2">
+          <button className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold sm:px-3 sm:py-2 sm:text-sm ${tab === "calendario" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("calendario")} type="button">
             Generar calendario
           </button>
-          <button className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "cruces" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("cruces")} type="button">
+          <button className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold sm:px-3 sm:py-2 sm:text-sm ${tab === "cruces" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("cruces")} type="button">
             Generar cruces
           </button>
         </div>

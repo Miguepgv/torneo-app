@@ -98,13 +98,21 @@ export default function AdminEquipoDetallePage() {
 
     const equipoCargado = teamData as Equipo;
     setGrupoDraft(equipoCargado.grupo ?? "");
-    if (rol === "delegado" && equipoCargado.delegado_id !== user.id) {
-      setForbidden(true);
-      setMessage("Solo puedes ver y editar tu propio equipo.");
-      setEquipo(null);
-      setJugadores([]);
-      setLoading(false);
-      return;
+    if (rol === "delegado") {
+      const allowedIds = new Set<string>([user.id]);
+      const email = (user.email ?? "").trim().toLowerCase();
+      if (email) {
+        const { data: rows } = await supabase.from("usuarios").select("id").eq("correo", email);
+        for (const r of (rows ?? []) as { id: string }[]) allowedIds.add(r.id);
+      }
+      if (!equipoCargado.delegado_id || !allowedIds.has(equipoCargado.delegado_id)) {
+        setForbidden(true);
+        setMessage("Solo puedes ver y editar tu propio equipo.");
+        setEquipo(null);
+        setJugadores([]);
+        setLoading(false);
+        return;
+      }
     }
 
     const { data: playersData, error: playersError } = await supabase

@@ -103,6 +103,8 @@ const TIEBREAK_ALLOWED = new Set(TIEBREAK_OPTIONS.map((o) => o.key));
 
 export default function AdminConfiguracionPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [rol, setRol] = useState<string | null>(null);
+  const [checkingRole, setCheckingRole] = useState(true);
   const [cfg, setCfg] = useState<Config>(DEFAULT_CONFIG);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -186,6 +188,24 @@ export default function AdminConfiguracionPage() {
   }, [cfg]);
 
   useEffect(() => {
+    async function roleGuard() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setRol(null);
+        setCheckingRole(false);
+        return;
+      }
+      const { data } = await supabase.from("usuarios").select("rol").eq("id", user.id).single();
+      setRol((data?.rol as string | undefined) ?? null);
+      setCheckingRole(false);
+    }
+    void roleGuard();
+  }, [supabase]);
+
+  useEffect(() => {
+    if (checkingRole || rol !== "admin") return;
     async function load() {
       const {
         data: { session },
@@ -218,7 +238,28 @@ export default function AdminConfiguracionPage() {
       }
     }
     void load();
-  }, [supabase]);
+  }, [supabase, rol, checkingRole]);
+
+  if (checkingRole) {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="text-sm text-slate-600">Comprobando permisos...</p>
+        </div>
+      </main>
+    );
+  }
+  if (rol !== "admin") {
+    return (
+      <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
+          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            Esta seccion solo esta disponible para administradores.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -266,13 +307,13 @@ export default function AdminConfiguracionPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-8">
+    <main className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 rounded-2xl bg-white p-6 shadow-sm">
-        <div className="flex gap-2">
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/equipos">Equipos</a>
-          <a className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white" href="/admin/configuracion">Configuracion torneo</a>
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/calendario">Calendario</a>
-          <a className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-700" href="/admin/directo">Directo</a>
+        <div className="flex flex-wrap gap-2">
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/equipos">Equipos</a>
+          <a className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white sm:px-3 sm:py-2 sm:text-sm" href="/admin/configuracion">Configuracion torneo</a>
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/calendario">Calendario</a>
+          <a className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs font-semibold text-violet-700 sm:px-3 sm:py-2 sm:text-sm" href="/admin/directo">Directo</a>
         </div>
 
         <h1 className="text-2xl font-bold text-violet-800">Configuracion torneo</h1>

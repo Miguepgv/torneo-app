@@ -30,17 +30,37 @@ export default function AdminEquiposPage() {
   const esAdmin = rol === "admin";
   const esDelegado = rol === "delegado";
 
-  async function cargarEquipos(userId: string | undefined, rolUsuario: RolUsuario) {
-    let query = supabase
-      .from("equipos")
-      .select("id,nombre,codigo_inscripcion,grupo")
-      .order("created_at", { ascending: false });
+  async function cargarEquipos(userId: string | undefined, rolUsuario: RolUsuario, userEmail?: string | null) {
+    let data: Equipo[] | null = null;
+    let error: { message: string } | null = null;
 
-    if (rolUsuario === "delegado" && userId) {
-      query = query.eq("delegado_id", userId);
+    if (rolUsuario === "delegado") {
+      const ids = new Set<string>();
+      if (userId) ids.add(userId);
+      const email = (userEmail ?? "").trim().toLowerCase();
+      if (email) {
+        const { data: rows } = await supabase.from("usuarios").select("id").eq("correo", email);
+        for (const r of (rows ?? []) as { id: string }[]) ids.add(r.id);
+      }
+      if (ids.size === 0) {
+        data = [];
+      } else {
+        const q = await supabase
+          .from("equipos")
+          .select("id,nombre,codigo_inscripcion,grupo")
+          .in("delegado_id", [...ids])
+          .order("created_at", { ascending: false });
+        data = (q.data as Equipo[] | null) ?? [];
+        error = q.error ? { message: q.error.message } : null;
+      }
+    } else {
+      const q = await supabase
+        .from("equipos")
+        .select("id,nombre,codigo_inscripcion,grupo")
+        .order("created_at", { ascending: false });
+      data = (q.data as Equipo[] | null) ?? [];
+      error = q.error ? { message: q.error.message } : null;
     }
-
-    const { data, error } = await query;
 
     if (error) {
       setMessage(`Error cargando equipos: ${error.message}`);
@@ -102,7 +122,7 @@ export default function AdminEquiposPage() {
         return;
       }
 
-      await cargarEquipos(user.id, rolUsuario);
+      await cargarEquipos(user.id, rolUsuario, user.email ?? null);
     }
 
     void init();
@@ -168,7 +188,7 @@ export default function AdminEquiposPage() {
       .select("rol")
       .eq("id", user?.id ?? "")
       .single();
-    await cargarEquipos(user?.id, (perfil?.rol as RolUsuario) ?? rol);
+    await cargarEquipos(user?.id, (perfil?.rol as RolUsuario) ?? rol, user?.email ?? null);
   }
 
   async function borrarEquipo(id: string) {
@@ -190,7 +210,7 @@ export default function AdminEquiposPage() {
       .select("rol")
       .eq("id", user?.id ?? "")
       .single();
-    await cargarEquipos(user?.id, (perfil?.rol as RolUsuario) ?? rol);
+    await cargarEquipos(user?.id, (perfil?.rol as RolUsuario) ?? rol, user?.email ?? null);
   }
 
   async function guardarGrupo(equipoId: string) {
@@ -226,7 +246,7 @@ export default function AdminEquiposPage() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    await cargarEquipos(user?.id, rol);
+    await cargarEquipos(user?.id, rol, user?.email ?? null);
   }
 
   return (

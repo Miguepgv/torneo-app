@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -12,6 +12,36 @@ export default function ResetPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    async function bootstrapRecoverySession() {
+      try {
+        const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const accessToken = hash.get("access_token");
+        const refreshToken = hash.get("refresh_token");
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) {
+            setMessage("El enlace de recuperacion no es valido o ha caducado. Pide uno nuevo.");
+          }
+        } else {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (!session) {
+            setMessage("Abre esta pantalla desde el enlace recibido por correo para crear tu contrasena.");
+          }
+        }
+      } finally {
+        setReady(true);
+      }
+    }
+    void bootstrapRecoverySession();
+  }, [supabase]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,9 +121,9 @@ export default function ResetPasswordPage() {
           <button
             className="rounded-lg bg-violet-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
             type="submit"
-            disabled={loading}
+            disabled={loading || !ready}
           >
-            {loading ? "Guardando..." : "Guardar contrasena"}
+            {loading ? "Guardando..." : !ready ? "Preparando enlace..." : "Guardar contrasena"}
           </button>
         </form>
 
