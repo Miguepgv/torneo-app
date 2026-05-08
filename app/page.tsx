@@ -83,11 +83,6 @@ export default function Home() {
     () => partidos.filter((p) => (p.estado ?? "").toLowerCase() === "jugandose"),
     [partidos],
   );
-  const resto = useMemo(
-    () => partidos.filter((p) => (p.estado ?? "").toLowerCase() !== "jugandose").slice(0, 12),
-    [partidos],
-  );
-
   return (
     <main className="min-h-screen flex-1 bg-gradient-to-b from-slate-100 via-violet-50/40 to-slate-100 pb-16">
       <div className="relative overflow-hidden border-b border-violet-200/60 bg-gradient-to-br from-violet-700 via-violet-800 to-indigo-900 px-4 py-12 sm:py-16">
@@ -101,12 +96,6 @@ export default function Home() {
           <p className="mt-4 max-w-xl mx-auto text-base text-violet-100">
             Marcadores actualizados en vivo, clasificación, equipos y goleadores. Lo que marca el equipo de campo aparece aquí cada pocos segundos.
           </p>
-          <Link
-            href="/clasificaciones"
-            className="mt-8 inline-flex items-center rounded-full bg-white px-6 py-3 text-sm font-bold text-violet-900 shadow-lg hover:bg-violet-50 transition-colors"
-          >
-            Ver clasificación
-          </Link>
         </div>
       </div>
 
@@ -163,45 +152,20 @@ export default function Home() {
             </div>
           ) : null}
 
-          {resto.length > 0 ? (
-            <div>
-              <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-600">Otros partidos</h3>
-              <div className="grid gap-3">
-                {resto.map((p) => (
-                  <Link
-                    key={p.id}
-                    href={`/resultados/${p.id}`}
-                    className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4 transition hover:border-violet-300 hover:bg-white sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="flex flex-wrap items-baseline gap-2">
-                      <span className="font-semibold text-slate-900">
-                        {nombre(nombres, p.equipo_local_id)} {p.goles_local ?? 0} — {p.goles_visitante ?? 0}{" "}
-                        {nombre(nombres, p.equipo_visitante_id)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {estadoBadge(p.estado)}
-                      <span className="text-xs text-slate-500">
-                        {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Sin fecha"}
-                      </span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
+          {!loading && enDirecto.length === 0 ? (
+            <p className="rounded-xl bg-slate-50 p-6 text-center text-slate-600">
+              Ahora mismo no hay partidos en juego. Puedes ver todos en{" "}
+              <Link className="font-semibold text-violet-700 underline" href="/resultados">
+                Resultados
+              </Link>
+              .
+            </p>
           ) : null}
         </section>
 
         <section>
           <h2 className="mb-4 text-lg font-bold text-slate-800">Accesos rápidos</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Link
-              href="/clasificaciones"
-              className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-600 to-indigo-700 p-5 text-white shadow-lg transition hover:scale-[1.02] hover:shadow-xl"
-            >
-              <p className="text-sm font-semibold text-violet-100">Clasificación</p>
-              <p className="mt-1 text-lg font-bold">Grupos y cuadros</p>
-            </Link>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Link
               href="/resultados"
               className="rounded-2xl border border-slate-200 bg-white p-5 shadow-md transition hover:border-violet-300 hover:shadow-lg"
