@@ -50,6 +50,7 @@ export default function AdminEquipoDetallePage() {
   const [guardandoAliasId, setGuardandoAliasId] = useState<string | null>(null);
   const [grupoDraft, setGrupoDraft] = useState("");
   const [guardandoGrupo, setGuardandoGrupo] = useState(false);
+  const [descargandoPdfId, setDescargandoPdfId] = useState<string | null>(null);
 
   async function cargarTodo() {
     setLoading(true);
@@ -203,6 +204,60 @@ export default function AdminEquipoDetallePage() {
   useEffect(() => {
     if (equipoId) void cargarTodo();
   }, [equipoId]);
+
+  async function onDescargarPdfConsentimiento(jugadorId: string) {
+    setDescargandoPdfId(jugadorId);
+    setMessage("");
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setMessage("Sesion caducada. Vuelve a iniciar sesion.");
+        return;
+      }
+      const res = await fetch(`/api/admin/jugadores/${jugadorId}/consent-pdf`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        let err = res.statusText;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j.error) err = j.error;
+        } catch {
+          /* ignore */
+        }
+        setMessage(`No se pudo descargar el PDF: ${err}`);
+        return;
+      }
+      const blob = await res.blob();
+      const dispo = res.headers.get("Content-Disposition");
+      let filename = `inscripcion-${jugadorId.slice(0, 8)}.pdf`;
+      const m = dispo?.match(/filename="([^"]+)"/);
+      if (m?.[1]) filename = m[1];
+      const url = URL.createObjectURL(blob);
+      const opened = window.open(url, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 120_000);
+      setMessage(
+        opened
+          ? "PDF de consentimiento abierto en una pestaña nueva (puedes guardarlo desde el visor del navegador)."
+          : "PDF de consentimiento descargado (el navegador bloqueo abrir pestaña nueva).",
+      );
+    } finally {
+      setDescargandoPdfId(null);
+    }
+  }
 
   async function onSubirEscudo(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -644,10 +699,18 @@ export default function AdminEquipoDetallePage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-2xl font-bold">Jugadores</h2>
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">Jugadores</h2>
+                  {miRol === "admin" ? (
+                    <p className="mt-1 text-sm text-slate-600">
+                      Como administrador puedes abrir el PDF de consentimiento de cada jugador (mayores y menores),
+                      con el mismo texto legal e identificadores guardados en el momento de la inscripcion.
+                    </p>
+                  ) : null}
+                </div>
                 <button
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                  className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                   onClick={() => void cargarTodo()}
                   type="button"
                 >
@@ -704,13 +767,26 @@ export default function AdminEquipoDetallePage() {
                           </div>
                         </div>
                       </div>
-                      <button
-                        className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white"
-                        onClick={() => void onBorrarJugador(jugador.id)}
-                        type="button"
-                      >
-                        Borrar
-                      </button>
+                      <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+                        {miRol === "admin" ? (
+                          <button
+                            className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-900 disabled:opacity-60"
+                            onClick={() => void onDescargarPdfConsentimiento(jugador.id)}
+                            type="button"
+                            disabled={descargandoPdfId === jugador.id}
+                            title="Abre el PDF de consentimiento (mismo contenido que consta en base de datos; el correo automatico al tutor solo aplica a menores)."
+                          >
+                            {descargandoPdfId === jugador.id ? "Abriendo..." : "PDF consentimiento"}
+                          </button>
+                        ) : null}
+                        <button
+                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white"
+                          onClick={() => void onBorrarJugador(jugador.id)}
+                          type="button"
+                        >
+                          Borrar
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

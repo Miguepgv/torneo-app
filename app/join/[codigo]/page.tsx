@@ -1,16 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-
-function calcAge(fechaNacimiento: string): number {
-  const birth = new Date(fechaNacimiento);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return age;
-}
+import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
+import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
 
 export default function JoinByCodePage() {
   const params = useParams<{ codigo: string }>();
@@ -26,17 +19,23 @@ export default function JoinByCodePage() {
   const [fotoPerfil, setFotoPerfil] = useState<File | null>(null);
   const [dniTutorDelante, setDniTutorDelante] = useState<File | null>(null);
   const [dniTutorDetras, setDniTutorDetras] = useState<File | null>(null);
+  const [tutorEmail, setTutorEmail] = useState("");
+  const [tutorTelefono, setTutorTelefono] = useState("");
+  const [tutorDni, setTutorDni] = useState("");
   const [firma, setFirma] = useState("");
   const [acepta, setAcepta] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [inscripcionOk, setInscripcionOk] = useState(false);
 
-  const edad = fechaNacimiento ? calcAge(fechaNacimiento) : null;
+  const edad = fechaNacimiento ? calcEdadAniosCumplidos(fechaNacimiento) : null;
   const esMenor = edad !== null ? edad < 18 : false;
+  const legalBundle = useMemo(() => getInscriptionLegalBundle(esMenor), [esMenor]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
+    setInscripcionOk(false);
 
     if (!dniDelante || !dniDetras) {
       setMessage("Debes subir DNI delante y detras.");
@@ -45,6 +44,23 @@ export default function JoinByCodePage() {
     if (esMenor && (!dniTutorDelante || !dniTutorDetras)) {
       setMessage("Si eres menor, debes subir tambien DNI del padre/madre/tutor.");
       return;
+    }
+    if (esMenor) {
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tutorEmail.trim());
+      if (!emailOk) {
+        setMessage("Si eres menor, el email del tutor es obligatorio y debe ser valido.");
+        return;
+      }
+      const digits = tutorTelefono.replace(/\D/g, "");
+      if (digits.length < 6) {
+        setMessage("Si eres menor, el telefono del tutor es obligatorio (minimo 6 digitos).");
+        return;
+      }
+      const dniT = tutorDni.trim().toUpperCase().replace(/\s+/g, "");
+      if (dniT.length < 5 || dniT.length > 20) {
+        setMessage("Si eres menor, indica el DNI/NIE del tutor (5 a 20 caracteres, como en el documento).");
+        return;
+      }
     }
     if (!acepta || !firma.trim()) {
       setMessage("Debes aceptar terminos y firmar para completar la inscripcion.");
@@ -60,17 +76,28 @@ export default function JoinByCodePage() {
     formData.append("fechaNacimiento", fechaNacimiento);
     formData.append("firma", firma);
     formData.append("acepta", "true");
+    formData.append("legalVersion", legalBundle.version);
     formData.append("dniDelante", dniDelante);
     formData.append("dniDetras", dniDetras);
     if (fotoPerfil) formData.append("fotoPerfil", fotoPerfil);
     if (dniTutorDelante) formData.append("dniTutorDelante", dniTutorDelante);
     if (dniTutorDetras) formData.append("dniTutorDetras", dniTutorDetras);
+    if (esMenor) {
+      formData.append("tutorEmail", tutorEmail.trim().toLowerCase());
+      formData.append("tutorTelefono", tutorTelefono.trim());
+      formData.append("tutorDni", tutorDni.trim());
+    }
 
     const response = await fetch("/api/join/register", {
       method: "POST",
       body: formData,
     });
-    const result = (await response.json()) as { error?: string; ok?: boolean };
+    const result = (await response.json()) as {
+      error?: string;
+      ok?: boolean;
+      tutorEmailEnviado?: boolean | null;
+      tutorEmailError?: string | null;
+    };
 
     if (!response.ok) {
       setMessage(`Error: ${result.error ?? "No se pudo completar la inscripcion."}`);
@@ -78,12 +105,18 @@ export default function JoinByCodePage() {
       return;
     }
 
-    setMessage("Inscripcion completada correctamente.");
+    setInscripcionOk(true);
+    if (result.tutorEmailEnviado === false) {
+      const detalle = result.tutorEmailError?.trim()
+        ? `\n\nDetalle:\n${result.tutorEmailError}`
+        : "";
+      setMessage(
+        `Inscripcion completada, pero el correo al tutor no se ha enviado.${detalle}\n\nLos datos del jugador estan guardados. Revisa SMTP_PASS / Gmail o Resend en el servidor.`,
+      );
+    } else {
+      setMessage("Inscripcion completada correctamente.");
+    }
     setLoading(false);
-    setTimeout(() => {
-      router.push("/");
-      router.refresh();
-    }, 1000);
   }
 
   return (
@@ -154,6 +187,40 @@ export default function JoinByCodePage() {
 
           {esMenor ? (
             <>
+              <p className="text-sm font-semibold text-amber-800">
+                Menor de edad: datos del padre/madre/tutor legal (obligatorios)
+              </p>
+              <input
+                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="Email del tutor (recibira el resguardo con las condiciones aceptadas)"
+                value={tutorEmail}
+                onChange={(event) => setTutorEmail(event.target.value)}
+                required
+              />
+              <input
+                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="Telefono de contacto del tutor (urgencias)"
+                value={tutorTelefono}
+                onChange={(event) => setTutorTelefono(event.target.value)}
+                required
+              />
+              <input
+                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
+                placeholder="DNI o NIE del tutor (tal como figura en el documento)"
+                value={tutorDni}
+                onChange={(event) => setTutorDni(event.target.value)}
+                autoComplete="off"
+                required
+              />
+              <p className="text-xs text-slate-600">
+                El DNI del tutor constara en el resguardo por correo y en el PDF de administracion, ademas de las fotos del documento.
+              </p>
               <label className="text-sm font-semibold text-slate-700">
                 DNI tutor delante (obligatorio por ser menor)
               </label>
@@ -177,30 +244,8 @@ export default function JoinByCodePage() {
             </>
           ) : null}
 
-          <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <p className="font-bold">TERMINOS Y CONDICIONES, DESCARGO DE RESPONSABILIDAD Y USO DE IMAGEN</p>
-            <p className="mt-2 font-semibold">Maraton Cofrade 2026</p>
-            <p className="mt-2">
-              Al marcar la casilla de aceptacion y firmar este documento de forma digital para formalizar mi inscripcion
-              en el torneo, declaro bajo mi propia responsabilidad que:
-            </p>
-            <p className="mt-2">1) Estoy en condiciones fisicas y mentales aptas para la practica del futbol.</p>
-            <p className="mt-1">
-              2) Asumo los riesgos inherentes del deporte y exonero de responsabilidad a organizacion, arbitros,
-              patrocinadores e instalaciones por lesiones, accidentes o danos.
-            </p>
-            <p className="mt-1">3) Acepto y respetare el reglamento del torneo y conducta deportiva.</p>
-            <p className="mt-1">
-              4) Autorizo el uso de imagen, nombre, alias y foto de perfil para app, redes y promocion del evento.
-            </p>
-            <p className="mt-1">
-              5) Consiento el tratamiento de datos personales e imagenes de DNI para gestion, verificacion de identidad
-              y funcionamiento de la app.
-            </p>
-            <p className="mt-1 font-semibold">
-              Si soy menor de edad, el padre/madre/tutor legal autoriza expresamente mi participacion bajo su
-              responsabilidad.
-            </p>
+          <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+            {legalBundle.fullText}
           </div>
 
           <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -211,12 +256,20 @@ export default function JoinByCodePage() {
               className="mt-1"
               required
             />
-            <span>He leido y acepto los terminos y condiciones, y consiento la inscripcion.</span>
+            <span>
+              {esMenor
+                ? "En calidad de padre/madre/tutor legal declaro haber leido y acepto los terminos anteriores y consiento la inscripcion del menor."
+                : "He leido y acepto los terminos y condiciones, y consiento la inscripcion."}
+            </span>
           </label>
 
           <input
             className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Firma (nombre y apellidos)"
+            placeholder={
+              esMenor
+                ? "Firma del Padre/Madre/Tutor legal (nombre y apellidos)"
+                : "Firma (nombre y apellidos)"
+            }
             value={firma}
             onChange={(event) => setFirma(event.target.value)}
             required
@@ -225,13 +278,29 @@ export default function JoinByCodePage() {
           <button
             className="rounded-lg bg-violet-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
             type="submit"
-            disabled={loading}
+            disabled={loading || inscripcionOk}
           >
             {loading ? "Enviando..." : "Completar inscripcion"}
           </button>
         </form>
 
-        {message ? <p className="rounded-lg bg-slate-100 p-3 text-sm text-slate-900">{message}</p> : null}
+        {inscripcionOk ? (
+          <div className="flex flex-col gap-4 rounded-xl border-2 border-violet-300 bg-violet-50 p-4 shadow-sm">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">{message}</p>
+            <button
+              type="button"
+              className="rounded-lg bg-violet-700 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-violet-800"
+              onClick={() => {
+                router.push("/");
+                router.refresh();
+              }}
+            >
+              Ir al inicio
+            </button>
+          </div>
+        ) : message ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-slate-900">{message}</p>
+        ) : null}
       </div>
     </main>
   );

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { PwaRegister } from "@/components/PwaRegister";
@@ -15,11 +15,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#4f46e5",
+};
+
 export const metadata: Metadata = {
   title: "Maraton Cofrade 2026",
   description: "App del torneo con Supabase y Next.js",
   manifest: "/manifest.webmanifest",
-  themeColor: "#4f46e5",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -45,29 +48,34 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <Script id="localhost-sw-reset" strategy="beforeInteractive">{`
-          (function () {
-            try {
-              var host = window.location.hostname;
-              var isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-              if (!isLocal || !("serviceWorker" in navigator)) return;
-              navigator.serviceWorker.getRegistrations().then(function (regs) {
-                return Promise.all(regs.map(function (r) { return r.unregister(); }));
-              }).then(function () {
-                if (!("caches" in window)) return;
-                return caches.keys().then(function (keys) {
-                  return Promise.all(keys.map(function (k) { return caches.delete(k); }));
-                });
-              }).finally(function () {
-                var key = "__sw_reset_once__";
-                if (!sessionStorage.getItem(key)) {
-                  sessionStorage.setItem(key, "1");
-                  window.location.reload();
-                }
-              });
-            } catch (e) {}
-          })();
-        `}</Script>
+        <Script
+          id="localhost-sw-reset"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
+(function () {
+  try {
+    var host = window.location.hostname;
+    var isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if (!isLocal || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      return Promise.all(regs.map(function (r) { return r.unregister(); }));
+    }).then(function () {
+      if (!("caches" in window)) return;
+      return caches.keys().then(function (keys) {
+        return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+      });
+    }).finally(function () {
+      var key = "__sw_reset_once__";
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+      }
+    });
+  } catch (e) {}
+})();`,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col bg-slate-100">
         <PwaRegister />
