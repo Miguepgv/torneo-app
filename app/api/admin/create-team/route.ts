@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { setPasswordAuthCallbackUrl } from "@/lib/server/auth-redirect";
 import { resolveDelegadoForTeam } from "@/lib/server/resolve-delegado";
 
 type CreateTeamPayload = {
@@ -78,8 +79,7 @@ export async function POST(request: NextRequest) {
   }
 
   const adminClient = createClient(url, serviceRoleKey);
-  const base = appBaseUrl(request);
-  const setPasswordRedirect = `${base}/reset-password`;
+  const setPasswordRedirect = setPasswordAuthCallbackUrl(request);
 
   const resolved = await resolveDelegadoForTeam(
     adminClient,

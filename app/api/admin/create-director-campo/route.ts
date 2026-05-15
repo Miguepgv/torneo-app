@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { setPasswordAuthCallbackUrl } from "@/lib/server/auth-redirect";
 import { findAuthUserIdByEmail } from "@/lib/server/resolve-delegado";
 
 type Body = {
@@ -8,17 +9,6 @@ type Body = {
   apellidos?: string;
   telefono?: string;
 };
-
-function appBaseUrl(request: NextRequest) {
-  const origin = request.headers.get("origin")?.replace(/\/$/, "") ?? "";
-  if (origin.includes("localhost") || origin.includes("127.0.0.1")) return origin;
-  const fromEnv = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (fromEnv) return fromEnv;
-  const vercel = process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel}`;
-  if (origin) return origin;
-  return "http://localhost:3000";
-}
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization") ?? "";
@@ -54,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   const adminClient = createClient(url, serviceRoleKey);
-  const redirectTo = `${appBaseUrl(request)}/reset-password`;
+  const redirectTo = setPasswordAuthCallbackUrl(request);
   const fullName = `${nombre} ${apellidos}`.trim() || nombre;
   const perfilPayload = {
     correo: email,

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { setPasswordAuthCallbackUrlFromOrigin } from "@/lib/auth-redirect-url";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -95,7 +96,7 @@ export default function LoginPage() {
 
     const redirectTo =
       typeof window !== "undefined"
-        ? `${window.location.origin}/reset-password`
+        ? setPasswordAuthCallbackUrlFromOrigin(window.location.origin)
         : undefined;
 
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { appBaseUrl } from "@/lib/server/app-base-url";
+import { setPasswordAuthCallbackUrl } from "@/lib/server/auth-redirect";
 import { findAuthUserIdByEmail } from "@/lib/server/resolve-delegado";
 
 type InviteBody = {
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   }
 
   const adminClient = createClient(url!, serviceRoleKey!);
-  const redirectTo = `${appBaseUrl(request)}/reset-password`;
+  const redirectTo = setPasswordAuthCallbackUrl(request);
   const fullName = `${nombre} ${apellidos}`.trim() || nombre || email.split("@")[0] || "Administrador";
 
   const { data: existing } = await adminClient.from("usuarios").select("id,rol").eq("correo", email).maybeSingle();
