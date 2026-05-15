@@ -5,6 +5,32 @@ import { useParams, useRouter } from "next/navigation";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
 import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
 
+const inputClass =
+  "w-full rounded-lg border border-slate-300 bg-white p-3 text-base text-slate-900 placeholder:text-slate-400";
+
+const fileInputClass =
+  "w-full rounded-lg border border-slate-300 bg-white p-2 text-base text-slate-900 file:mr-3 file:rounded-md file:border-0 file:bg-violet-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-violet-900";
+
+function FieldLabel({
+  children,
+  required,
+  hint,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="mb-1">
+      <span className="block text-sm font-semibold text-slate-800">
+        {children}
+        {required ? <span className="text-red-600"> *</span> : null}
+      </span>
+      {hint ? <span className="mt-0.5 block text-xs text-slate-600">{hint}</span> : null}
+    </div>
+  );
+}
+
 export default function JoinByCodePage() {
   const params = useParams<{ codigo: string }>();
   const router = useRouter();
@@ -125,123 +151,166 @@ export default function JoinByCodePage() {
         <h1 className="text-2xl font-bold text-violet-800">Inscripcion de jugador</h1>
         <p className="text-sm text-slate-600">Codigo de equipo: {codigo}</p>
 
-        <form className="grid gap-3" onSubmit={onSubmit}>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Nombre"
-            value={nombre}
-            onChange={(event) => setNombre(event.target.value)}
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Apellidos"
-            value={apellidos}
-            onChange={(event) => setApellidos(event.target.value)}
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Alias (opcional)"
-            value={alias}
-            onChange={(event) => setAlias(event.target.value)}
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            type="date"
-            value={fechaNacimiento}
-            onChange={(event) => setFechaNacimiento(event.target.value)}
-            required
-          />
+        <form className="grid gap-4" onSubmit={onSubmit}>
+          <div>
+            <FieldLabel required>Nombre</FieldLabel>
+            <input
+              className={inputClass}
+              name="nombre"
+              autoComplete="given-name"
+              value={nombre}
+              onChange={(event) => setNombre(event.target.value)}
+              required
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">DNI delante</label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setDniDelante(event.target.files?.[0] ?? null)}
-            required
-          />
+          <div>
+            <FieldLabel required>Apellidos</FieldLabel>
+            <input
+              className={inputClass}
+              name="apellidos"
+              autoComplete="family-name"
+              value={apellidos}
+              onChange={(event) => setApellidos(event.target.value)}
+              required
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">DNI detras</label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setDniDetras(event.target.files?.[0] ?? null)}
-            required
-          />
+          <div>
+            <FieldLabel hint="Opcional, para la app y clasificaciones.">Alias</FieldLabel>
+            <input
+              className={inputClass}
+              name="alias"
+              value={alias}
+              onChange={(event) => setAlias(event.target.value)}
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">
-            Foto de perfil (cara, tipo ficha)
-          </label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
-          />
-          <p className="text-xs text-slate-600">
-            Sube una foto de la cara, como para ficha de jugador.
-          </p>
+          <div>
+            <FieldLabel required hint="Toca el recuadro para elegir dia, mes y ano.">
+              Fecha de nacimiento
+            </FieldLabel>
+            <input
+              className={`${inputClass} min-h-[48px] [color-scheme:light]`}
+              type="date"
+              name="fechaNacimiento"
+              value={fechaNacimiento}
+              onChange={(event) => setFechaNacimiento(event.target.value)}
+              required
+            />
+            {edad !== null ? (
+              <p className="mt-1 text-xs text-slate-600">
+                Edad calculada: {edad} anos {esMenor ? "(menor de edad)" : "(mayor de edad)"}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <FieldLabel required>DNI delante (foto)</FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => setDniDelante(event.target.files?.[0] ?? null)}
+              required
+            />
+          </div>
+
+          <div>
+            <FieldLabel required>DNI detras (foto)</FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => setDniDetras(event.target.files?.[0] ?? null)}
+              required
+            />
+          </div>
+
+          <div>
+            <FieldLabel hint="Foto de la cara, tipo carnet o ficha.">Foto de perfil</FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept="image/*"
+              capture="user"
+              onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
+            />
+          </div>
 
           {esMenor ? (
-            <>
-              <p className="text-sm font-semibold text-amber-800">
-                Menor de edad: datos del padre/madre/tutor legal (obligatorios)
+            <div className="grid gap-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4">
+              <p className="text-sm font-semibold text-amber-950">
+                Menor de edad: datos del padre, madre o tutor legal
               </p>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Email del tutor (recibira el resguardo con las condiciones aceptadas)"
-                value={tutorEmail}
-                onChange={(event) => setTutorEmail(event.target.value)}
-                required
-              />
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="Telefono de contacto del tutor (urgencias)"
-                value={tutorTelefono}
-                onChange={(event) => setTutorTelefono(event.target.value)}
-                required
-              />
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-                placeholder="DNI o NIE del tutor (tal como figura en el documento)"
-                value={tutorDni}
-                onChange={(event) => setTutorDni(event.target.value)}
-                autoComplete="off"
-                required
-              />
-              <p className="text-xs text-slate-600">
-                El DNI del tutor constara en el resguardo por correo y en el PDF de administracion, ademas de las fotos del documento.
-              </p>
-              <label className="text-sm font-semibold text-slate-700">
-                DNI tutor delante (obligatorio por ser menor)
-              </label>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-                type="file"
-                accept="image/*"
-                onChange={(event) => setDniTutorDelante(event.target.files?.[0] ?? null)}
-                required
-              />
-              <label className="text-sm font-semibold text-slate-700">
-                DNI tutor detras (obligatorio por ser menor)
-              </label>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-                type="file"
-                accept="image/*"
-                onChange={(event) => setDniTutorDetras(event.target.files?.[0] ?? null)}
-                required
-              />
-            </>
+
+              <div>
+                <FieldLabel required hint="Recibira el resguardo de la inscripcion.">
+                  Email del tutor
+                </FieldLabel>
+                <input
+                  className={inputClass}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={tutorEmail}
+                  onChange={(event) => setTutorEmail(event.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required>Telefono del tutor (urgencias)</FieldLabel>
+                <input
+                  className={inputClass}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={tutorTelefono}
+                  onChange={(event) => setTutorTelefono(event.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required hint="Tal como figura en el DNI del tutor.">
+                  DNI o NIE del tutor
+                </FieldLabel>
+                <input
+                  className={inputClass}
+                  value={tutorDni}
+                  onChange={(event) => setTutorDni(event.target.value)}
+                  autoComplete="off"
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required>DNI del tutor — delante (foto)</FieldLabel>
+                <input
+                  className={fileInputClass}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(event) => setDniTutorDelante(event.target.files?.[0] ?? null)}
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required>DNI del tutor — detras (foto)</FieldLabel>
+                <input
+                  className={fileInputClass}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(event) => setDniTutorDetras(event.target.files?.[0] ?? null)}
+                  required
+                />
+              </div>
+            </div>
           ) : null}
 
           <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
@@ -263,17 +332,24 @@ export default function JoinByCodePage() {
             </span>
           </label>
 
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder={
-              esMenor
-                ? "Firma del Padre/Madre/Tutor legal (nombre y apellidos)"
-                : "Firma (nombre y apellidos)"
-            }
-            value={firma}
-            onChange={(event) => setFirma(event.target.value)}
-            required
-          />
+          <div>
+            <FieldLabel
+              required
+              hint={
+                esMenor
+                  ? "Escribe nombre y apellidos del padre, madre o tutor legal."
+                  : "Escribe tu nombre y apellidos como firma."
+              }
+            >
+              {esMenor ? "Firma del tutor (nombre y apellidos)" : "Firma (nombre y apellidos)"}
+            </FieldLabel>
+            <input
+              className={inputClass}
+              value={firma}
+              onChange={(event) => setFirma(event.target.value)}
+              required
+            />
+          </div>
 
           <button
             className="rounded-lg bg-violet-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
