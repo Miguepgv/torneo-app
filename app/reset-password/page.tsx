@@ -92,7 +92,10 @@ function ResetPasswordForm() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
+    const { error } = await supabase.auth.updateUser({
+      password,
+      data: { must_set_password: false },
+    });
     if (error) {
       const msg = error.message.toLowerCase();
       const samePassword =
@@ -113,7 +116,8 @@ function ResetPasswordForm() {
       return;
     }
 
-    setMessage("Contrasena guardada. Ya puedes iniciar sesion.");
+    await supabase.auth.signOut();
+    setMessage("Contrasena guardada. Inicia sesion con tu correo y la contrasena que acabas de crear.");
     setLoading(false);
     setTimeout(() => {
       router.push("/login");

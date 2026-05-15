@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { INVITE_USER_METADATA, markAuthUserMustSetPassword } from "@/lib/server/auth-invite-metadata";
 import { setPasswordAuthCallbackUrl } from "@/lib/server/auth-redirect";
 import { findAuthUserIdByEmail } from "@/lib/server/resolve-delegado";
 
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest) {
       apellidos,
       nombre_completo: fullName,
       rol_app: "director_campo",
+      ...INVITE_USER_METADATA,
     },
   });
 
@@ -85,6 +87,7 @@ export async function POST(request: NextRequest) {
     const reset = await anon.auth.resetPasswordForEmail(email, { redirectTo });
     accessEmailSent = !reset.error;
     emailError = reset.error?.message ?? null;
+    await markAuthUserMustSetPassword(adminClient.auth.admin, authId);
   }
 
   const up = await adminClient

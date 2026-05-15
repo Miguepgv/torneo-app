@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { INVITE_USER_METADATA, markAuthUserMustSetPassword } from "@/lib/server/auth-invite-metadata";
 
 /** Busca usuario en Auth por email (paginado). */
 export async function findAuthUserIdByEmail(
@@ -163,6 +164,7 @@ export async function resolveDelegadoForTeam(
     if (upErr) {
       return { ok: false, error: `No se pudo actualizar usuario: ${upErr.message}` };
     }
+    await markAuthUserMustSetPassword(adminClient.auth.admin, existingRow.id);
     const sent = await sendDelegateSetPasswordEmail(
       ctx.supabaseUrl,
       ctx.anonKey,
@@ -187,6 +189,7 @@ export async function resolveDelegadoForTeam(
       apellidos,
       nombre_completo: displayName,
       rol_app: "delegado",
+      ...INVITE_USER_METADATA,
     },
   });
 
@@ -249,6 +252,7 @@ export async function resolveDelegadoForTeam(
     return { ok: false, error: `No se pudo guardar perfil del delegado: ${upErr2.message}` };
   }
 
+  await markAuthUserMustSetPassword(adminClient.auth.admin, authId);
   const sent = await sendDelegateSetPasswordEmail(
     ctx.supabaseUrl,
     ctx.anonKey,

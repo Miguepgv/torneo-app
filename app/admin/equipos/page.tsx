@@ -196,9 +196,25 @@ export default function AdminEquiposPage() {
     const confirmar = window.confirm("Quieres borrar este equipo?");
     if (!confirmar) return;
 
-    const { error } = await supabase.from("equipos").delete().eq("id", id);
-    if (error) {
-      setMessage(`Error borrando equipo: ${error.message}`);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      setMessage("Sesion caducada. Vuelve a iniciar sesion.");
+      return;
+    }
+
+    const res = await fetch("/api/admin/delete-equipo", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ equipoId: id }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setMessage(`Error borrando equipo: ${json.error ?? res.statusText}`);
       return;
     }
     setMessage("Equipo borrado.");

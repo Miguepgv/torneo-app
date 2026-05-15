@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
+import { AuthSessionGuard } from "@/components/AuthSessionGuard";
 import { PwaRegister } from "@/components/PwaRegister";
 import { SiteNav } from "@/components/SiteNav";
 import "./globals.css";
@@ -78,6 +79,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col bg-slate-100">
+        <AuthSessionGuard />
         <PwaRegister />
         <SiteNav />
         {children}
