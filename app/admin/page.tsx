@@ -62,6 +62,14 @@ export default function AdminHomePage() {
             </a>
           ) : null}
           {rol === "admin" ? (
+            <a
+              className="rounded-lg border-2 border-violet-600 bg-white px-4 py-3 text-center font-semibold text-violet-800"
+              href="/admin/administradores"
+            >
+              Administradores
+            </a>
+          ) : null}
+          {rol === "admin" ? (
             <a className="rounded-lg bg-violet-600 px-4 py-3 text-center font-semibold text-white" href="/admin/calendario">
               Calendario
             </a>
