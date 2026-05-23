@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { compressImageFile } from "@/lib/client/compress-image";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
 import { getInscriptionLegalFullText, INSCRIPTION_LEGAL_VERSION } from "@/lib/inscripcion-legal";
 
@@ -24,20 +25,12 @@ export default function JoinByCodePage() {
   const [firma, setFirma] = useState("");
   const [acepta, setAcepta] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingHint, setLoadingHint] = useState("");
   const [message, setMessage] = useState("");
   const [inscripcionOk, setInscripcionOk] = useState(false);
 
   const edad = fechaNacimiento ? calcEdadAniosCumplidos(fechaNacimiento) : null;
   const esMenor = edad !== null ? edad < 18 : false;
-  const MAX_MB = 10;
-
-  function archivoDemasiadoGrande(file: File | null, etiqueta: string): string | null {
-    if (!file) return null;
-    if (file.size > MAX_MB * 1024 * 1024) {
-      return `${etiqueta} supera ${MAX_MB} MB. Comprime la imagen antes de enviar.`;
-    }
-    return null;
-  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,22 +62,20 @@ export default function JoinByCodePage() {
       return;
     }
 
-    const tamanoErr =
-      archivoDemasiadoGrande(dniDelante, "DNI delante") ??
-      archivoDemasiadoGrande(dniDetras, "DNI detras") ??
-      archivoDemasiadoGrande(fotoPerfil, "Foto de perfil") ??
-      archivoDemasiadoGrande(dniTutorDelante, "DNI tutor delante") ??
-      archivoDemasiadoGrande(dniTutorDetras, "DNI tutor detras");
-    if (tamanoErr) {
-      setMessage(tamanoErr);
-      return;
-    }
-
     setLoading(true);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 120_000);
+    setLoadingHint("Preparando fotos...");
 
     try {
+      const dniDelanteOk = await compressImageFile(dniDelante);
+      const dniDetrasOk = await compressImageFile(dniDetras);
+      const fotoPerfilOk = fotoPerfil ? await compressImageFile(fotoPerfil, 1200) : null;
+      const dniTutorDelanteOk =
+        dniTutorDelante && esMenor ? await compressImageFile(dniTutorDelante) : null;
+      const dniTutorDetrasOk =
+        dniTutorDetras && esMenor ? await compressImageFile(dniTutorDetras) : null;
+
+      setLoadingHint("Subiendo inscripcion, no cierres la pagina (puede tardar varios minutos)...");
+
       const formData = new FormData();
       formData.append("codigo", codigo);
       formData.append("nombre", nombre);
@@ -94,11 +85,11 @@ export default function JoinByCodePage() {
       formData.append("firma", firma);
       formData.append("acepta", "true");
       formData.append("legalVersion", INSCRIPTION_LEGAL_VERSION);
-      formData.append("dniDelante", dniDelante);
-      formData.append("dniDetras", dniDetras);
-      if (fotoPerfil) formData.append("fotoPerfil", fotoPerfil);
-      if (dniTutorDelante) formData.append("dniTutorDelante", dniTutorDelante);
-      if (dniTutorDetras) formData.append("dniTutorDetras", dniTutorDetras);
+      formData.append("dniDelante", dniDelanteOk);
+      formData.append("dniDetras", dniDetrasOk);
+      if (fotoPerfilOk) formData.append("fotoPerfil", fotoPerfilOk);
+      if (dniTutorDelanteOk) formData.append("dniTutorDelante", dniTutorDelanteOk);
+      if (dniTutorDetrasOk) formData.append("dniTutorDetras", dniTutorDetrasOk);
       if (esMenor) {
         formData.append("tutorEmail", tutorEmail.trim().toLowerCase());
         formData.append("tutorTelefono", tutorTelefono.trim());
@@ -107,7 +98,6 @@ export default function JoinByCodePage() {
       const response = await fetch("/api/join/register", {
         method: "POST",
         body: formData,
-        signal: controller.signal,
       });
 
       let result: { error?: string; ok?: boolean; tutorEmailPendiente?: boolean | null } = {};
@@ -117,7 +107,7 @@ export default function JoinByCodePage() {
         setMessage(
           response.ok
             ? "Inscripcion enviada, pero la respuesta del servidor no es valida. Recarga la pagina y comprueba si el jugador aparece en el equipo."
-            : `Error del servidor (${response.status}). Intentalo de nuevo con imagenes mas pequeñas o mas tarde.`,
+            : `Error del servidor (${response.status}). Espera un momento e intentalo de nuevo.`,
         );
         return;
       }
@@ -135,19 +125,11 @@ export default function JoinByCodePage() {
       } else {
         setMessage("Inscripcion completada correctamente.");
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        setMessage(
-          "La subida tardo demasiado (mas de 2 minutos). Comprime las fotos del DNI e intentalo de nuevo.",
-        );
-      } else {
-        setMessage(
-          "No se pudo conectar con el servidor. Comprueba tu conexion e intentalo de nuevo.",
-        );
-      }
+    } catch {
+      setMessage("No se pudo conectar con el servidor. Comprueba tu conexion e intentalo de nuevo.");
     } finally {
-      window.clearTimeout(timeoutId);
       setLoading(false);
+      setLoadingHint("");
     }
   }
 
@@ -214,8 +196,7 @@ export default function JoinByCodePage() {
             onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
           />
           <p className="text-xs text-slate-600">
-            Sube una foto de la cara, como para ficha de jugador. Cada imagen debe pesar menos de{" "}
-            {MAX_MB} MB.
+            Sube una foto de la cara, como para ficha de jugador. Puedes usar las fotos del movil tal cual.
           </p>
 
           {esMenor ? (
@@ -298,8 +279,11 @@ export default function JoinByCodePage() {
             type="submit"
             disabled={loading || inscripcionOk}
           >
-            {loading ? "Enviando..." : "Completar inscripcion"}
+            {loading ? "Enviando inscripcion..." : "Completar inscripcion"}
           </button>
+          {loading && loadingHint ? (
+            <p className="text-center text-sm font-medium text-violet-800">{loadingHint}</p>
+          ) : null}
         </form>
 
         {inscripcionOk ? (

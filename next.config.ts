@@ -10,6 +10,12 @@ try {
 
 const nextConfig: NextConfig = {
   /** Next.js 16: ya no existe `eslint` en next.config (lint aparte con npm run lint). */
+  experimental: {
+    proxyClientMaxBodySize: "50mb",
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

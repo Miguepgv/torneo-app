@@ -3,17 +3,22 @@ import { createClient } from "@supabase/supabase-js";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
 import { getInscriptionLegalFullText, INSCRIPTION_LEGAL_VERSION } from "@/lib/inscripcion-legal";
 import { getClientIp, getUserAgent } from "@/lib/server/request-meta";
+import { prepareImageForUpload } from "@/lib/server/prepare-upload-image";
 import { sendTutorInscriptionEmail } from "@/lib/server/send-tutor-inscription-email";
+
+export const maxDuration = 300;
+export const runtime = "nodejs";
 
 async function uploadFile(
   client: ReturnType<typeof createClient>,
   bucket: string,
   path: string,
   file: File,
+  maxSide = 2400,
 ) {
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const { buffer, contentType } = await prepareImageForUpload(file, maxSide);
   const upload = await client.storage.from(bucket).upload(path, buffer, {
-    contentType: file.type || "application/octet-stream",
+    contentType,
     upsert: true,
   });
   if (upload.error) throw new Error(upload.error.message);
@@ -21,15 +26,6 @@ async function uploadFile(
 
 function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
-
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-
-function assertFileSizeOk(file: File, label: string): string | null {
-  if (file.size > MAX_FILE_BYTES) {
-    return `${label} supera 10 MB. Comprime la imagen o usa otra foto.`;
-  }
-  return null;
 }
 
 function hayDatosTutorEnFormulario(
@@ -91,18 +87,6 @@ export async function POST(request: NextRequest) {
   }
   if (!dniDelante || !dniDetras) {
     return NextResponse.json({ error: "DNI delante y detras son obligatorios." }, { status: 400 });
-  }
-
-  for (const [file, label] of [
-    [dniDelante, "DNI delante"],
-    [dniDetras, "DNI detras"],
-    [fotoPerfil, "Foto de perfil"],
-    [dniTutorDelante, "DNI tutor delante"],
-    [dniTutorDetras, "DNI tutor detras"],
-  ] as const) {
-    if (!file) continue;
-    const sizeErr = assertFileSizeOk(file, label);
-    if (sizeErr) return NextResponse.json({ error: sizeErr }, { status: 400 });
   }
 
   const edad = calcEdadAniosCumplidos(fechaNacimiento);
@@ -181,7 +165,7 @@ export async function POST(request: NextRequest) {
       await uploadFile(adminClient, "dnis_privados", `${basePath}-tutor-detras`, dniTutorDetras);
     }
     if (fotoPerfil && fotoPath) {
-      await uploadFile(adminClient, "escudos", fotoPath, fotoPerfil);
+      await uploadFile(adminClient, "escudos", fotoPath, fotoPerfil, 1200);
     }
   } catch (error) {
     return NextResponse.json(
