@@ -1,16 +1,18 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
 import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
-import { uploadFileWithRetry } from "@/lib/client/upload-with-progress";
+import { uploadViaSignedToken } from "@/lib/client/upload-with-progress";
+import { prepareImageForUpload } from "@/lib/client/prepare-image-for-upload";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { JoinUploadSlotKey } from "@/lib/server/join-storage-paths";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white p-3 text-base text-slate-900 placeholder:text-slate-400";
 
-const fileAccept = "image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
+const fileAccept = "image/*";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -74,6 +76,15 @@ export default function JoinByCodePage() {
   const esMenor = edad !== null ? edad < 18 : false;
   const legalBundle = useMemo(() => getInscriptionLegalBundle(esMenor), [esMenor]);
 
+  useEffect(() => {
+    if (!loading) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [loading]);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
@@ -129,8 +140,10 @@ export default function JoinByCodePage() {
         fotoPath?: string | null;
         uploads?: {
           key: JoinUploadSlotKey;
-          signedUrl: string;
+          bucket: string;
           path: string;
+          signedUrl: string;
+          token: string;
         }[];
       };
 
@@ -158,11 +171,12 @@ export default function JoinByCodePage() {
 
       const totalUploads = prepareResult.uploads.length;
       const storagePaths: Partial<Record<JoinUploadSlotKey, string>> = {};
+      const supabase = getSupabaseBrowserClient();
 
       for (let index = 0; index < prepareResult.uploads.length; index++) {
         const slot = prepareResult.uploads[index];
-        const file = filesByKey[slot.key];
-        if (!file) {
+        const rawFile = filesByKey[slot.key];
+        if (!rawFile) {
           throw new Error(`Falta el archivo: ${uploadLabels[slot.key] ?? slot.key}`);
         }
 
@@ -171,22 +185,34 @@ export default function JoinByCodePage() {
 
         setUploadProgress({
           percent: basePercent,
-          label: `Subiendo ${uploadLabels[slot.key]} (${formatFileSize(file.size)})...`,
+          label: `Preparando ${uploadLabels[slot.key]}...`,
           active: true,
         });
 
-        await uploadFileWithRetry(
-          slot.signedUrl,
+        const file = await prepareImageForUpload(rawFile);
+
+        setUploadProgress({
+          percent: basePercent + Math.round(slicePercent * 0.15),
+          label: `Enviando ${uploadLabels[slot.key]} (${formatFileSize(file.size)})...`,
+          active: true,
+        });
+
+        await uploadViaSignedToken(
+          supabase,
+          slot.bucket,
+          slot.path,
+          slot.token,
           file,
           (filePercent) => {
-            const overall = basePercent + Math.round((filePercent / 100) * slicePercent);
+            const inner = Math.round(slicePercent * 0.15 + (filePercent / 100) * slicePercent * 0.85);
+            const overall = basePercent + inner;
             setUploadProgress({
               percent: Math.min(99, overall),
               label: `Subiendo ${uploadLabels[slot.key]} (${filePercent}%)...`,
               active: true,
             });
           },
-          1,
+          slot.signedUrl,
         );
 
         storagePaths[slot.key] = slot.path;
@@ -257,6 +283,10 @@ export default function JoinByCodePage() {
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 rounded-2xl bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold text-violet-800">Inscripcion de jugador</h1>
         <p className="text-sm text-slate-600">Codigo de equipo: {codigo}</p>
+        <p className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950">
+          Al pulsar <strong>Completar inscripcion</strong>, no cierres esta pagina. Puede tardar un
+          minuto: veras el porcentaje de avance. Funciona con datos o WiFi.
+        </p>
 
         <form className="grid gap-4" onSubmit={onSubmit}>
           <div>
@@ -489,8 +519,8 @@ export default function JoinByCodePage() {
                 />
               </div>
               <p className="mt-2 text-xs text-violet-900">
-                No cierres esta pagina. En movil con fotos grandes puede tardar 1-2 minutos; la barra
-                indica el avance real.
+                Si el porcentaje no avanza durante mucho rato, espera un poco mas o vuelve a pulsar el
+                boton cuando tengas mejor cobertura.
               </p>
             </div>
           ) : null}

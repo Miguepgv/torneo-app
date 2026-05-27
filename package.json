@@ -11,7 +11,8 @@
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.3",
-    "jspdf": "^3.0.0",
+    "heic2any": "^0.0.4",
+    "jspdf": "^3.0.4",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",

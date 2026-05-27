@@ -1,4 +1,11 @@
-const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const UPLOAD_TIMEOUT_MS = 6 * 60 * 1000;
+const RETRY_DELAYS_MS = [0, 2000, 4000, 7000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export function uploadFileWithProgress(
   signedUrl: string,
@@ -8,7 +15,7 @@ export function uploadFileWithProgress(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", signedUrl);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.setRequestHeader("Content-Type", file.type || "image/jpeg");
     xhr.timeout = UPLOAD_TIMEOUT_MS;
 
     xhr.upload.onprogress = (event) => {
@@ -23,32 +30,66 @@ export function uploadFileWithProgress(
         resolve();
         return;
       }
-      reject(new Error(`No se pudo subir el archivo (codigo ${xhr.status}).`));
+      reject(new Error("upload_http"));
     };
 
-    xhr.onerror = () => reject(new Error("Error de red al subir. Comprueba la conexion e intentalo de nuevo."));
-    xhr.ontimeout = () =>
-      reject(new Error("La subida tardo demasiado. Prueba con mejor senal WiFi o datos moviles."));
-
+    xhr.onerror = () => reject(new Error("upload_network"));
+    xhr.ontimeout = () => reject(new Error("upload_timeout"));
     xhr.send(file);
   });
 }
 
-export async function uploadFileWithRetry(
-  signedUrl: string,
+function uploadErrorMessage(code: string): string {
+  if (code === "upload_timeout") {
+    return "La subida tardo demasiado. Espera un momento y pulsa otra vez Completar inscripcion.";
+  }
+  return "No se pudo enviar una foto. Comprueba que tienes cobertura (datos o WiFi) e intentalo de nuevo.";
+}
+
+/** SDK Supabase + reintentos + respaldo XHR (cubre casi todos los moviles). */
+export async function uploadViaSignedToken(
+  supabase: SupabaseClient,
+  bucket: string,
+  path: string,
+  token: string,
   file: File,
   onProgress: (percent: number) => void,
-  retries = 1,
+  signedUrlFallback: string,
 ): Promise<void> {
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      if (attempt > 0) onProgress(0);
-      await uploadFileWithProgress(signedUrl, file, onProgress);
+  let lastCode = "upload_network";
+
+  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) {
+      onProgress(5);
+      await sleep(RETRY_DELAYS_MS[attempt] ?? 3000);
+    }
+
+    onProgress(10 + attempt * 2);
+
+    const { error } = await supabase.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+
+    if (!error) {
+      onProgress(100);
       return;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error("Error desconocido al subir.");
+    }
+
+    lastCode = error.message?.toLowerCase().includes("timeout") ? "upload_timeout" : "upload_network";
+
+    try {
+      await uploadFileWithProgress(signedUrlFallback, file, (p) => {
+        onProgress(Math.min(99, 15 + Math.round(p * 0.84)));
+      });
+      return;
+    } catch (e) {
+      lastCode = e instanceof Error ? e.message : "upload_network";
+      if (lastCode !== "upload_http" && lastCode !== "upload_network" && lastCode !== "upload_timeout") {
+        lastCode = "upload_network";
+      }
     }
   }
-  throw lastError ?? new Error("No se pudo subir el archivo.");
+
+  throw new Error(uploadErrorMessage(lastCode));
 }
