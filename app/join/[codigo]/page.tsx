@@ -1,10 +1,50 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { compressImageFile } from "@/lib/client/compress-image";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
-import { getInscriptionLegalFullText, INSCRIPTION_LEGAL_VERSION } from "@/lib/inscripcion-legal";
+import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
+import { uploadFileWithRetry } from "@/lib/client/upload-with-progress";
+import type { JoinUploadSlotKey } from "@/lib/server/join-storage-paths";
+
+const inputClass =
+  "w-full rounded-lg border border-slate-300 bg-white p-3 text-base text-slate-900 placeholder:text-slate-400";
+
+const fileAccept = "image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const fileInputClass =
+  "w-full rounded-lg border border-slate-300 bg-white p-2 text-base text-slate-900 file:mr-3 file:rounded-md file:border-0 file:bg-violet-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-violet-900";
+
+type UploadProgress = {
+  percent: number;
+  label: string;
+  active: boolean;
+};
+
+function FieldLabel({
+  children,
+  required,
+  hint,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="mb-1">
+      <span className="block text-sm font-semibold text-slate-800">
+        {children}
+        {required ? <span className="text-red-600"> *</span> : null}
+      </span>
+      {hint ? <span className="mt-0.5 block text-xs text-slate-600">{hint}</span> : null}
+    </div>
+  );
+}
 
 export default function JoinByCodePage() {
   const params = useParams<{ codigo: string }>();
@@ -22,15 +62,17 @@ export default function JoinByCodePage() {
   const [dniTutorDetras, setDniTutorDetras] = useState<File | null>(null);
   const [tutorEmail, setTutorEmail] = useState("");
   const [tutorTelefono, setTutorTelefono] = useState("");
+  const [tutorDni, setTutorDni] = useState("");
   const [firma, setFirma] = useState("");
   const [acepta, setAcepta] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadingHint, setLoadingHint] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [message, setMessage] = useState("");
   const [inscripcionOk, setInscripcionOk] = useState(false);
 
   const edad = fechaNacimiento ? calcEdadAniosCumplidos(fechaNacimiento) : null;
   const esMenor = edad !== null ? edad < 18 : false;
+  const legalBundle = useMemo(() => getInscriptionLegalBundle(esMenor), [esMenor]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -56,6 +98,11 @@ export default function JoinByCodePage() {
         setMessage("Si eres menor, el telefono del tutor es obligatorio (minimo 6 digitos).");
         return;
       }
+      const dniT = tutorDni.trim().toUpperCase().replace(/\s+/g, "");
+      if (dniT.length < 5 || dniT.length > 20) {
+        setMessage("Si eres menor, indica el DNI/NIE del tutor (5 a 20 caracteres, como en el documento).");
+        return;
+      }
     }
     if (!acepta || !firma.trim()) {
       setMessage("Debes aceptar terminos y firmar para completar la inscripcion.");
@@ -63,73 +110,145 @@ export default function JoinByCodePage() {
     }
 
     setLoading(true);
-    setLoadingHint("Preparando fotos...");
+    setUploadProgress({ percent: 0, label: "Preparando subida...", active: true });
 
     try {
-      const dniDelanteOk = await compressImageFile(dniDelante);
-      const dniDetrasOk = await compressImageFile(dniDetras);
-      const fotoPerfilOk = fotoPerfil ? await compressImageFile(fotoPerfil, 1200) : null;
-      const dniTutorDelanteOk =
-        dniTutorDelante && esMenor ? await compressImageFile(dniTutorDelante) : null;
-      const dniTutorDetrasOk =
-        dniTutorDetras && esMenor ? await compressImageFile(dniTutorDetras) : null;
+      const prepareResponse = await fetch("/api/join/prepare-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codigo,
+          esMenor,
+          incluirFotoPerfil: Boolean(fotoPerfil),
+          nombre,
+        }),
+      });
+      const prepareResult = (await prepareResponse.json()) as {
+        error?: string;
+        basePath?: string;
+        fotoPath?: string | null;
+        uploads?: {
+          key: JoinUploadSlotKey;
+          signedUrl: string;
+          path: string;
+        }[];
+      };
 
-      setLoadingHint("Subiendo inscripcion, no cierres la pagina (puede tardar varios minutos)...");
-
-      const formData = new FormData();
-      formData.append("codigo", codigo);
-      formData.append("nombre", nombre);
-      formData.append("apellidos", apellidos);
-      formData.append("alias", alias);
-      formData.append("fechaNacimiento", fechaNacimiento);
-      formData.append("firma", firma);
-      formData.append("acepta", "true");
-      formData.append("legalVersion", INSCRIPTION_LEGAL_VERSION);
-      formData.append("dniDelante", dniDelanteOk);
-      formData.append("dniDetras", dniDetrasOk);
-      if (fotoPerfilOk) formData.append("fotoPerfil", fotoPerfilOk);
-      if (dniTutorDelanteOk) formData.append("dniTutorDelante", dniTutorDelanteOk);
-      if (dniTutorDetrasOk) formData.append("dniTutorDetras", dniTutorDetrasOk);
-      if (esMenor) {
-        formData.append("tutorEmail", tutorEmail.trim().toLowerCase());
-        formData.append("tutorTelefono", tutorTelefono.trim());
+      if (!prepareResponse.ok || !prepareResult.uploads?.length || !prepareResult.basePath) {
+        throw new Error(prepareResult.error ?? "No se pudo preparar la subida de archivos.");
       }
+
+      const filesByKey: Partial<Record<JoinUploadSlotKey, File>> = {
+        dniDelante,
+        dniDetras,
+      };
+      if (fotoPerfil) filesByKey.fotoPerfil = fotoPerfil;
+      if (esMenor && dniTutorDelante && dniTutorDetras) {
+        filesByKey.dniTutorDelante = dniTutorDelante;
+        filesByKey.dniTutorDetras = dniTutorDetras;
+      }
+
+      const uploadLabels: Record<JoinUploadSlotKey, string> = {
+        dniDelante: "DNI delante",
+        dniDetras: "DNI detras",
+        dniTutorDelante: "DNI tutor delante",
+        dniTutorDetras: "DNI tutor detras",
+        fotoPerfil: "Foto de perfil",
+      };
+
+      const totalUploads = prepareResult.uploads.length;
+      const storagePaths: Partial<Record<JoinUploadSlotKey, string>> = {};
+
+      for (let index = 0; index < prepareResult.uploads.length; index++) {
+        const slot = prepareResult.uploads[index];
+        const file = filesByKey[slot.key];
+        if (!file) {
+          throw new Error(`Falta el archivo: ${uploadLabels[slot.key] ?? slot.key}`);
+        }
+
+        const basePercent = Math.round((index / (totalUploads + 1)) * 100);
+        const slicePercent = Math.round(100 / (totalUploads + 1));
+
+        setUploadProgress({
+          percent: basePercent,
+          label: `Subiendo ${uploadLabels[slot.key]} (${formatFileSize(file.size)})...`,
+          active: true,
+        });
+
+        await uploadFileWithRetry(
+          slot.signedUrl,
+          file,
+          (filePercent) => {
+            const overall = basePercent + Math.round((filePercent / 100) * slicePercent);
+            setUploadProgress({
+              percent: Math.min(99, overall),
+              label: `Subiendo ${uploadLabels[slot.key]} (${filePercent}%)...`,
+              active: true,
+            });
+          },
+          1,
+        );
+
+        storagePaths[slot.key] = slot.path;
+      }
+
+      setUploadProgress({
+        percent: 95,
+        label: "Guardando inscripcion y enviando correo...",
+        active: true,
+      });
 
       const response = await fetch("/api/join/register", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codigo,
+          nombre,
+          apellidos,
+          alias,
+          fechaNacimiento,
+          firma,
+          acepta: true,
+          legalVersion: legalBundle.version,
+          tutorEmail: esMenor ? tutorEmail.trim().toLowerCase() : undefined,
+          tutorTelefono: esMenor ? tutorTelefono.trim() : undefined,
+          tutorDni: esMenor ? tutorDni.trim() : undefined,
+          basePath: prepareResult.basePath,
+          fotoPath: prepareResult.fotoPath ?? null,
+          storagePaths,
+        }),
       });
 
-      let result: { error?: string; ok?: boolean; tutorEmailPendiente?: boolean | null } = {};
-      try {
-        result = (await response.json()) as typeof result;
-      } catch {
-        setMessage(
-          response.ok
-            ? "Inscripcion enviada, pero la respuesta del servidor no es valida. Recarga la pagina y comprueba si el jugador aparece en el equipo."
-            : `Error del servidor (${response.status}). Espera un momento e intentalo de nuevo.`,
-        );
-        return;
-      }
+      const result = (await response.json()) as {
+        error?: string;
+        ok?: boolean;
+        tutorEmailEnviado?: boolean | null;
+        tutorEmailError?: string | null;
+      };
 
       if (!response.ok) {
-        setMessage(`Error: ${result.error ?? "No se pudo completar la inscripcion."}`);
-        return;
+        throw new Error(result.error ?? "No se pudo completar la inscripcion.");
       }
 
+      setUploadProgress({ percent: 100, label: "Inscripcion completada", active: false });
       setInscripcionOk(true);
-      if (result.tutorEmailPendiente) {
+      if (result.tutorEmailEnviado === false) {
+        const detalle = result.tutorEmailError?.trim()
+          ? `\n\nDetalle:\n${result.tutorEmailError}`
+          : "";
         setMessage(
-          "Inscripcion completada correctamente.\n\nSi eres menor, el correo al tutor se envia en segundo plano (puede tardar unos minutos).",
+          `Inscripcion completada, pero el correo al tutor no se ha enviado.${detalle}\n\nLos datos del jugador estan guardados.`,
         );
       } else {
         setMessage("Inscripcion completada correctamente.");
       }
-    } catch {
-      setMessage("No se pudo conectar con el servidor. Comprueba tu conexion e intentalo de nuevo.");
+    } catch (error) {
+      setUploadProgress(null);
+      setMessage(
+        `Error: ${error instanceof Error ? error.message : "No se pudo completar la inscripcion."}`,
+      );
     } finally {
       setLoading(false);
-      setLoadingHint("");
     }
   }
 
@@ -139,116 +258,184 @@ export default function JoinByCodePage() {
         <h1 className="text-2xl font-bold text-violet-800">Inscripcion de jugador</h1>
         <p className="text-sm text-slate-600">Codigo de equipo: {codigo}</p>
 
-        <form className="grid gap-3" onSubmit={onSubmit}>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Nombre"
-            value={nombre}
-            onChange={(event) => setNombre(event.target.value)}
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Apellidos"
-            value={apellidos}
-            onChange={(event) => setApellidos(event.target.value)}
-            required
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder="Alias (opcional)"
-            value={alias}
-            onChange={(event) => setAlias(event.target.value)}
-          />
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            type="date"
-            value={fechaNacimiento}
-            onChange={(event) => setFechaNacimiento(event.target.value)}
-            required
-          />
+        <form className="grid gap-4" onSubmit={onSubmit}>
+          <div>
+            <FieldLabel required>Nombre</FieldLabel>
+            <input
+              className={inputClass}
+              name="nombre"
+              autoComplete="given-name"
+              value={nombre}
+              onChange={(event) => setNombre(event.target.value)}
+              required
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">DNI delante</label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setDniDelante(event.target.files?.[0] ?? null)}
-            required
-          />
+          <div>
+            <FieldLabel required>Apellidos</FieldLabel>
+            <input
+              className={inputClass}
+              name="apellidos"
+              autoComplete="family-name"
+              value={apellidos}
+              onChange={(event) => setApellidos(event.target.value)}
+              required
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">DNI detras</label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setDniDetras(event.target.files?.[0] ?? null)}
-            required
-          />
+          <div>
+            <FieldLabel hint="Opcional, para la app y clasificaciones.">Alias</FieldLabel>
+            <input
+              className={inputClass}
+              name="alias"
+              value={alias}
+              onChange={(event) => setAlias(event.target.value)}
+            />
+          </div>
 
-          <label className="text-sm font-semibold text-slate-700">
-            Foto de perfil (cara, tipo ficha)
-          </label>
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-            type="file"
-            accept="image/*"
-            onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
-          />
-          <p className="text-xs text-slate-600">
-            Sube una foto de la cara, como para ficha de jugador. Puedes usar las fotos del movil tal cual.
-          </p>
+          <div>
+            <FieldLabel required hint="Toca el recuadro para elegir dia, mes y ano.">
+              Fecha de nacimiento
+            </FieldLabel>
+            <input
+              className={`${inputClass} min-h-[48px] [color-scheme:light]`}
+              type="date"
+              name="fechaNacimiento"
+              value={fechaNacimiento}
+              onChange={(event) => setFechaNacimiento(event.target.value)}
+              required
+            />
+            {edad !== null ? (
+              <p className="mt-1 text-xs text-slate-600">
+                Edad calculada: {edad} anos {esMenor ? "(menor de edad)" : "(mayor de edad)"}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <FieldLabel required>DNI delante (foto)</FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => setDniDelante(event.target.files?.[0] ?? null)}
+              required
+            />
+          </div>
+
+          <div>
+            <FieldLabel required>DNI detras (foto)</FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept={fileAccept}
+              onChange={(event) => setDniDetras(event.target.files?.[0] ?? null)}
+              required
+            />
+            {dniDetras ? (
+              <p className="mt-1 text-xs text-slate-600">Archivo: {formatFileSize(dniDetras.size)}</p>
+            ) : null}
+          </div>
+
+          <div>
+            <FieldLabel hint="Foto de la cara, tipo carnet o ficha. Opcional.">
+              Foto de perfil
+            </FieldLabel>
+            <input
+              className={fileInputClass}
+              type="file"
+              accept={fileAccept}
+              onChange={(event) => setFotoPerfil(event.target.files?.[0] ?? null)}
+            />
+            {fotoPerfil ? (
+              <p className="mt-1 text-xs text-slate-600">Archivo: {formatFileSize(fotoPerfil.size)}</p>
+            ) : null}
+          </div>
 
           {esMenor ? (
-            <>
-              <p className="text-sm font-semibold text-amber-800">
-                Menor de edad: datos del padre/madre/tutor legal (obligatorios)
+            <div className="grid gap-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4">
+              <p className="text-sm font-semibold text-amber-950">
+                Menor de edad: datos del padre, madre o tutor legal
               </p>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Email del tutor (recibira el resguardo con las condiciones aceptadas)"
-                value={tutorEmail}
-                onChange={(event) => setTutorEmail(event.target.value)}
-                required
-              />
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="Telefono de contacto del tutor (urgencias)"
-                value={tutorTelefono}
-                onChange={(event) => setTutorTelefono(event.target.value)}
-                required
-              />
-              <label className="text-sm font-semibold text-slate-700">
-                DNI tutor delante (obligatorio por ser menor)
-              </label>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-                type="file"
-                accept="image/*"
-                onChange={(event) => setDniTutorDelante(event.target.files?.[0] ?? null)}
-                required
-              />
-              <label className="text-sm font-semibold text-slate-700">
-                DNI tutor detras (obligatorio por ser menor)
-              </label>
-              <input
-                className="rounded-lg border border-slate-300 bg-white p-2 text-slate-900"
-                type="file"
-                accept="image/*"
-                onChange={(event) => setDniTutorDetras(event.target.files?.[0] ?? null)}
-                required
-              />
-            </>
+
+              <div>
+                <FieldLabel required hint="Recibira el resguardo de la inscripcion.">
+                  Email del tutor
+                </FieldLabel>
+                <input
+                  className={inputClass}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={tutorEmail}
+                  onChange={(event) => setTutorEmail(event.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required>Telefono del tutor (urgencias)</FieldLabel>
+                <input
+                  className={inputClass}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={tutorTelefono}
+                  onChange={(event) => setTutorTelefono(event.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required hint="Tal como figura en el DNI del tutor.">
+                  DNI o NIE del tutor
+                </FieldLabel>
+                <input
+                  className={inputClass}
+                  value={tutorDni}
+                  onChange={(event) => setTutorDni(event.target.value)}
+                  autoComplete="off"
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel required>DNI del tutor — delante (foto)</FieldLabel>
+                <input
+                  className={fileInputClass}
+                  type="file"
+                  accept={fileAccept}
+                  onChange={(event) => setDniTutorDelante(event.target.files?.[0] ?? null)}
+                  required
+                />
+                {dniTutorDelante ? (
+                  <p className="mt-1 text-xs text-slate-600">
+                    Archivo: {formatFileSize(dniTutorDelante.size)}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <FieldLabel required>DNI del tutor — detras (foto)</FieldLabel>
+                <input
+                  className={fileInputClass}
+                  type="file"
+                  accept={fileAccept}
+                  onChange={(event) => setDniTutorDetras(event.target.files?.[0] ?? null)}
+                  required
+                />
+                {dniTutorDetras ? (
+                  <p className="mt-1 text-xs text-slate-600">
+                    Archivo: {formatFileSize(dniTutorDetras.size)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
           ) : null}
 
           <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
-            {getInscriptionLegalFullText()}
+            {legalBundle.fullText}
           </div>
 
           <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -259,31 +446,62 @@ export default function JoinByCodePage() {
               className="mt-1"
               required
             />
-            <span>He leido y acepto los terminos y condiciones, y consiento la inscripcion.</span>
+            <span>
+              {esMenor
+                ? "En calidad de padre/madre/tutor legal declaro haber leido y acepto los terminos anteriores y consiento la inscripcion del menor."
+                : "He leido y acepto los terminos y condiciones, y consiento la inscripcion."}
+            </span>
           </label>
 
-          <input
-            className="rounded-lg border border-slate-300 bg-white p-3 text-slate-900"
-            placeholder={
-              esMenor
-                ? "Firma del Padre/Madre/Tutor legal (nombre y apellidos)"
-                : "Firma (nombre y apellidos)"
-            }
-            value={firma}
-            onChange={(event) => setFirma(event.target.value)}
-            required
-          />
+          <div>
+            <FieldLabel
+              required
+              hint={
+                esMenor
+                  ? "Escribe nombre y apellidos del padre, madre o tutor legal."
+                  : "Escribe tu nombre y apellidos como firma."
+              }
+            >
+              {esMenor ? "Firma del tutor (nombre y apellidos)" : "Firma (nombre y apellidos)"}
+            </FieldLabel>
+            <input
+              className={inputClass}
+              value={firma}
+              onChange={(event) => setFirma(event.target.value)}
+              required
+            />
+          </div>
+
+          {uploadProgress ? (
+            <div
+              className="rounded-xl border border-violet-200 bg-violet-50 p-4"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2 text-sm font-semibold text-violet-950">
+                <span>{uploadProgress.label}</span>
+                <span>{uploadProgress.percent}%</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-violet-200">
+                <div
+                  className="h-full rounded-full bg-violet-600 transition-[width] duration-300 ease-out"
+                  style={{ width: `${uploadProgress.percent}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-violet-900">
+                No cierres esta pagina. En movil con fotos grandes puede tardar 1-2 minutos; la barra
+                indica el avance real.
+              </p>
+            </div>
+          ) : null}
 
           <button
             className="rounded-lg bg-violet-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
             type="submit"
             disabled={loading || inscripcionOk}
           >
-            {loading ? "Enviando inscripcion..." : "Completar inscripcion"}
+            {loading ? `Subiendo... ${uploadProgress?.percent ?? 0}%` : "Completar inscripcion"}
           </button>
-          {loading && loadingHint ? (
-            <p className="text-center text-sm font-medium text-violet-800">{loadingHint}</p>
-          ) : null}
         </form>
 
         {inscripcionOk ? (

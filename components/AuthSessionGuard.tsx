@@ -4,21 +4,43 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-const SKIP_PATHS = ["/reset-password", "/auth/callback", "/login"];
+const SKIP_PATHS = ["/reset-password", "/auth/callback", "/login", "/join"];
 
 function mustSetPassword(meta: Record<string, unknown> | undefined): boolean {
   return meta?.must_set_password === true || meta?.must_set_password === "true";
 }
 
+function isStaleRefreshTokenError(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return m.includes("refresh token") || m.includes("invalid refresh");
+}
+
+async function clearStaleAuthSession() {
+  const supabase = getSupabaseBrowserClient();
+  try {
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    // ignore
+  }
+}
+
+function pathIsSkipped(pathname: string): boolean {
+  return SKIP_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 /**
  * Tras invitacion/recuperacion: fuerza pantalla de contraseña antes de usar la app.
  * Tambien captura enlaces que caen en / con #access_token&type=invite.
+ * En paginas publicas (/join) no toca la sesion para evitar errores de refresh token.
  */
 export function AuthSessionGuard() {
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
+    if (pathIsSkipped(pathname)) return;
+
     const supabase = getSupabaseBrowserClient();
 
     async function handleHashOrCode() {
@@ -48,7 +70,10 @@ export function AuthSessionGuard() {
       });
       window.history.replaceState({}, "", pathname || "/");
 
-      if (error) return;
+      if (error) {
+        if (isStaleRefreshTokenError(error.message)) void clearStaleAuthSession();
+        return;
+      }
 
       if (type === "invite" || type === "recovery" || type === "signup") {
         router.replace("/reset-password");
@@ -59,14 +84,21 @@ export function AuthSessionGuard() {
   }, [pathname, router]);
 
   useEffect(() => {
+    if (pathIsSkipped(pathname)) return;
+
     const supabase = getSupabaseBrowserClient();
 
     async function enforcePasswordIfNeeded() {
-      if (SKIP_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return;
-
       const {
         data: { user },
+        error,
       } = await supabase.auth.getUser();
+
+      if (error && isStaleRefreshTokenError(error.message)) {
+        await clearStaleAuthSession();
+        return;
+      }
+
       if (!user) return;
 
       if (mustSetPassword(user.user_metadata as Record<string, unknown>)) {
@@ -81,7 +113,7 @@ export function AuthSessionGuard() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
         const meta = session.user.user_metadata as Record<string, unknown>;
-        if (mustSetPassword(meta) && !SKIP_PATHS.includes(pathname)) {
+        if (mustSetPassword(meta) && !pathIsSkipped(pathname)) {
           router.replace("/reset-password");
         }
       }
