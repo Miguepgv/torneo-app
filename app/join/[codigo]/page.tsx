@@ -132,6 +132,7 @@ export default function JoinByCodePage() {
           esMenor,
           incluirFotoPerfil: Boolean(fotoPerfil),
           nombre,
+          apellidos,
         }),
       });
       const prepareResult = (await prepareResponse.json()) as {

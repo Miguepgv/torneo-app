@@ -5,6 +5,7 @@ import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
 import { getClientIp, getUserAgent } from "@/lib/server/request-meta";
 import { sendTutorInscriptionEmail } from "@/lib/server/send-tutor-inscription-email";
 import type { JoinUploadSlotKey } from "@/lib/server/join-storage-paths";
+import { isSafeStorageObjectPath } from "@/lib/server/storage-path-sanitize";
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
@@ -243,6 +244,21 @@ export async function POST(request: NextRequest) {
     if (!item.path.startsWith(pathPrefix) && !item.path.startsWith(fotoPrefix)) {
       return NextResponse.json({ error: "Ruta de archivo no valida." }, { status: 400 });
     }
+    if (!isSafeStorageObjectPath(item.path)) {
+      return NextResponse.json(
+        {
+          error:
+            "Ruta de archivo no valida (caracteres no permitidos). Recarga la pagina e intenta de nuevo.",
+        },
+        { status: 400 },
+      );
+    }
+  }
+  if (basePath && !isSafeStorageObjectPath(basePath)) {
+    return NextResponse.json(
+      { error: "Sesion de subida caducada. Recarga la pagina e vuelve a enviar." },
+      { status: 400 },
+    );
   }
 
   try {

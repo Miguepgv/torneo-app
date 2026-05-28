@@ -1,3 +1,5 @@
+import { sanitizeStorageSlug } from "@/lib/server/storage-path-sanitize";
+
 export type JoinUploadSlotKey =
   | "dniDelante"
   | "dniDetras"
@@ -42,11 +44,6 @@ export function buildJoinStoragePaths(args: {
 }
 
 export function makeJoinSafeName(seed?: string): string {
-  const suffix = seed?.trim() || "jugador";
-  const slug = suffix
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return `${Date.now()}-${slug || "jugador"}`;
+  const slug = sanitizeStorageSlug(seed?.trim() || "jugador");
+  return `${Date.now()}-${slug}`;
 }

@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Codigo de equipo no valido." }, { status: 400 });
   }
 
-  const safeName = makeJoinSafeName(body.nombre);
+  const safeName = makeJoinSafeName(`${body.nombre ?? ""} ${body.apellidos ?? ""}`.trim());
   const { basePath, fotoPath, slots } = buildJoinStoragePaths({
     equipoId: equipo.id,
     safeName,
