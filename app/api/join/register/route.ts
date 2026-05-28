@@ -4,7 +4,7 @@ import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
 import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
 import { getClientIp, getUserAgent } from "@/lib/server/request-meta";
 import { sendTutorInscriptionEmail } from "@/lib/server/send-tutor-inscription-email";
-import type { JoinUploadSlotKey } from "@/lib/server/join-storage-paths";
+import type { JoinUploadSlotKey } from "@/lib/join-upload-types";
 import { isSafeStorageObjectPath } from "@/lib/server/storage-path-sanitize";
 
 function getAdminClient() {

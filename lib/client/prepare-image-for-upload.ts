@@ -17,11 +17,43 @@ async function blobToJpegFile(blob: Blob, baseName: string): Promise<File> {
   return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
 }
 
+const HEIC2ANY_SCRIPT = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+
+let heic2anyScriptPromise: Promise<void> | null = null;
+
+function loadHeic2AnyScript(): Promise<void> {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("browser"));
+  }
+  if (window.heic2any) return Promise.resolve();
+  if (heic2anyScriptPromise) return heic2anyScriptPromise;
+
+  heic2anyScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${HEIC2ANY_SCRIPT}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("heic_script")), { once: true });
+      if (window.heic2any) resolve();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = HEIC2ANY_SCRIPT;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("heic_script"));
+    document.head.appendChild(script);
+  });
+
+  return heic2anyScriptPromise;
+}
+
 async function decodeHeicToJpegBlob(file: File): Promise<Blob | null> {
   if (!isHeic(file)) return null;
   try {
-    const mod = await import("heic2any");
-    const heic2any = mod.default;
+    await loadHeic2AnyScript();
+    const heic2any = window.heic2any;
+    if (!heic2any) return null;
     const out = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.92 });
     return Array.isArray(out) ? out[0] : out;
   } catch {

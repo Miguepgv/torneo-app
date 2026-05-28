@@ -7,7 +7,7 @@ import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
 import { uploadViaSignedToken } from "@/lib/client/upload-with-progress";
 import { prepareImageForUpload } from "@/lib/client/prepare-image-for-upload";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { JoinUploadSlotKey } from "@/lib/server/join-storage-paths";
+import type { JoinUploadSlotKey } from "@/lib/join-upload-types";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white p-3 text-base text-slate-900 placeholder:text-slate-400";

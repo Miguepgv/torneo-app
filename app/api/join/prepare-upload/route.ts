@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
     esMenor?: boolean;
     incluirFotoPerfil?: boolean;
     nombre?: string;
+    apellidos?: string;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -67,7 +68,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Codigo de equipo no valido." }, { status: 400 });
   }
 
-  const safeName = makeJoinSafeName(`${body.nombre ?? ""} ${body.apellidos ?? ""}`.trim());
+  const safeName = makeJoinSafeName(
+    `${String(body.nombre ?? "").trim()} ${String(body.apellidos ?? "").trim()}`.trim(),
+  );
   const { basePath, fotoPath, slots } = buildJoinStoragePaths({
     equipoId: equipo.id,
     safeName,

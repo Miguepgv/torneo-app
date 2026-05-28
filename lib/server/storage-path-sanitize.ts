@@ -5,7 +5,7 @@
 export function sanitizeStorageSlug(input: string): string {
   const ascii = input
     .normalize("NFD")
-    .replace(/\p{M}/gu, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")

@@ -1,17 +1,7 @@
+import type { JoinUploadSlot, JoinUploadSlotKey } from "@/lib/join-upload-types";
 import { sanitizeStorageSlug } from "@/lib/server/storage-path-sanitize";
 
-export type JoinUploadSlotKey =
-  | "dniDelante"
-  | "dniDetras"
-  | "dniTutorDelante"
-  | "dniTutorDetras"
-  | "fotoPerfil";
-
-export type JoinUploadSlot = {
-  key: JoinUploadSlotKey;
-  bucket: string;
-  path: string;
-};
+export type { JoinUploadSlot, JoinUploadSlotKey } from "@/lib/join-upload-types";
 
 export function buildJoinStoragePaths(args: {
   equipoId: string;
