@@ -1,5 +1,5 @@
 /**
- * Textos legales distintos: el menor inscribe el tutor, que acepta en su propio nombre.
+ * Textos legales: mayor inscribe en su nombre; menor, el tutor acepta en el suyo.
  * Versiones separadas para auditoria y para forzar recarga si cambia el texto.
  */
 export const INSCRIPTION_LEGAL_VERSION_ADULT = "2026-05-adult-v1";
@@ -13,7 +13,6 @@ export function getInscriptionLegalTitleMinor(): string {
   return "TERMINOS Y CONDICIONES Y DESCARGO DE RESPONSABILIDAD (MENORES)";
 }
 
-/** Texto en primera persona del jugador (mayor de edad). */
 export function getInscriptionLegalFullTextAdult(): string {
   return [
     getInscriptionLegalTitleAdult(),
@@ -34,7 +33,6 @@ export function getInscriptionLegalFullTextAdult(): string {
   ].join("\n");
 }
 
-/** Texto en nombre del tutor; sin la frase generica de «si soy menor», que aqui no aplica. */
 export function getInscriptionLegalFullTextMinor(): string {
   return [
     getInscriptionLegalTitleMinor(),
@@ -55,33 +53,12 @@ export function getInscriptionLegalFullTextMinor(): string {
   ].join("\n");
 }
 
-export type InscriptionLegalBundle = {
-  version: string;
-  title: string;
-  fullText: string;
-};
-
-export function getInscriptionLegalBundle(esMenor: boolean): InscriptionLegalBundle {
-  if (esMenor) {
-    return {
-      version: INSCRIPTION_LEGAL_VERSION_MINOR,
-      title: getInscriptionLegalTitleMinor(),
-      fullText: getInscriptionLegalFullTextMinor(),
-    };
-  }
-  return {
-    version: INSCRIPTION_LEGAL_VERSION_ADULT,
-    title: getInscriptionLegalTitleAdult(),
-    fullText: getInscriptionLegalFullTextAdult(),
-  };
-}
-
-/** @deprecated Usar getInscriptionLegalBundle(esMenor).fullText */
+/** @deprecated Usar getInscriptionLegalBundle desde lib/inscription-legal-bundle.ts */
 export function getInscriptionLegalFullText(): string {
   return getInscriptionLegalFullTextAdult();
 }
 
-/** @deprecated Usar getInscriptionLegalBundle(esMenor).title */
+/** @deprecated Usar getInscriptionLegalBundle desde lib/inscription-legal-bundle.ts */
 export function getInscriptionLegalTitle(): string {
   return getInscriptionLegalTitleAdult();
 }

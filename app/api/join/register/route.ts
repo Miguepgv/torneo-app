@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
-import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
+import { getInscriptionLegalBundle } from "@/lib/inscription-legal-bundle";
 import { getClientIp, getUserAgent } from "@/lib/server/request-meta";
 import { sendTutorInscriptionEmail } from "@/lib/server/send-tutor-inscription-email";
 import type { JoinUploadSlotKey } from "@/lib/join-upload-types";

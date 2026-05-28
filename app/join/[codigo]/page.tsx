@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { calcEdadAniosCumplidos } from "@/lib/edad-inscripcion";
-import { getInscriptionLegalBundle } from "@/lib/inscripcion-legal";
+import { getInscriptionLegalBundle } from "@/lib/inscription-legal-bundle";
 import { uploadViaSignedToken } from "@/lib/client/upload-with-progress";
 import { prepareImageForUpload } from "@/lib/client/prepare-image-for-upload";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
