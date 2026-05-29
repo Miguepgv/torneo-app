@@ -348,8 +348,7 @@ export default function JoinByCodePage() {
             <input
               className={fileInputClass}
               type="file"
-              accept="image/*"
-              capture="environment"
+              accept={fileAccept}
               onChange={(event) => setDniDelante(event.target.files?.[0] ?? null)}
               required
             />
