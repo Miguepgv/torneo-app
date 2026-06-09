@@ -7,6 +7,7 @@ import {
   type StandingsEquipo,
   type StandingsPartido,
 } from "@/lib/server/torneo-standings";
+import { partidoTieneResultado } from "@/lib/partido-resultado";
 
 type KnockoutPartido = {
   id: string;
@@ -140,12 +141,7 @@ export async function syncKnockoutTeams(admin: SupabaseClient): Promise<Knockout
 
   if (finalizedGroups.size > 0) {
     const groupScorePartidos = allPartidos.filter(
-      (p) =>
-        (p.fase ?? "").startsWith("Grupo ") &&
-        p.equipo_local_id &&
-        p.equipo_visitante_id &&
-        p.goles_local !== null &&
-        p.goles_visitante !== null,
+      (p) => (p.fase ?? "").startsWith("Grupo ") && partidoTieneResultado(p),
     ) as StandingsPartido[];
 
     slotMap = computeSlotToTeamMap(

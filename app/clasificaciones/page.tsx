@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { tituloCompeticionMostrar } from "@/lib/torneo-constants";
+import {
+  golesPartidoLocal,
+  golesPartidoVisitante,
+  partidoTieneResultado,
+} from "@/lib/partido-resultado";
 
 type Equipo = { id: string; nombre: string };
 type Partido = {
@@ -11,6 +16,7 @@ type Partido = {
   equipo_visitante_id: string | null;
   goles_local: number | null;
   goles_visitante: number | null;
+  estado?: string | null;
   faltas_local?: number | null;
   faltas_visitante?: number | null;
   amarillas_local?: number | null;
@@ -496,7 +502,7 @@ export default function ClasificacionesPage() {
           supabase.from("equipos").select("id,nombre,grupo").order("nombre"),
           supabase
             .from("partidos")
-            .select("id,equipo_local_id,equipo_visitante_id,goles_local,goles_visitante,faltas_local,faltas_visitante,amarillas_local,amarillas_visitante,rojas_local,rojas_visitante,rojas_agresion_local,rojas_agresion_visitante"),
+            .select("id,equipo_local_id,equipo_visitante_id,goles_local,goles_visitante,estado,faltas_local,faltas_visitante,amarillas_local,amarillas_visitante,rojas_local,rojas_visitante,rojas_agresion_local,rojas_agresion_visitante"),
           supabase.from("configuracion_torneo").select("*").limit(1).maybeSingle(),
           supabase
             .from("partidos")
@@ -556,24 +562,19 @@ export default function ClasificacionesPage() {
       }
 
       for (const p of partidos) {
-        if (
-          !p.equipo_local_id ||
-          !p.equipo_visitante_id ||
-          p.goles_local === null ||
-          p.goles_visitante === null
-        ) {
-          continue;
-        }
-        const l = table[p.equipo_local_id];
-        const v = table[p.equipo_visitante_id];
+        if (!partidoTieneResultado(p)) continue;
+        const gl = golesPartidoLocal(p);
+        const gv = golesPartidoVisitante(p);
+        const l = table[p.equipo_local_id!];
+        const v = table[p.equipo_visitante_id!];
         if (!l || !v) continue;
 
         l.pj += 1;
         v.pj += 1;
-        l.gf += p.goles_local;
-        l.gc += p.goles_visitante;
-        v.gf += p.goles_visitante;
-        v.gc += p.goles_local;
+        l.gf += gl;
+        l.gc += gv;
+        v.gf += gv;
+        v.gc += gl;
         l.fairplay +=
           (Number(p.faltas_local ?? 0) * fairF) +
           (Number(p.amarillas_local ?? 0) * fairA) +
@@ -585,11 +586,11 @@ export default function ClasificacionesPage() {
           (Number(p.rojas_visitante ?? 0) * fairR) +
           (Number(p.rojas_agresion_visitante ?? 0) * fairRA);
 
-        if (p.goles_local > p.goles_visitante) {
+        if (gl > gv) {
           l.pg += 1;
           l.pts += 3;
           v.pp += 1;
-        } else if (p.goles_local < p.goles_visitante) {
+        } else if (gl < gv) {
           v.pg += 1;
           v.pts += 3;
           l.pp += 1;
@@ -607,14 +608,16 @@ export default function ClasificacionesPage() {
         let aPts = 0;
         let bPts = 0;
         for (const p of partidos) {
-          if (p.goles_local === null || p.goles_visitante === null) continue;
+          if (!partidoTieneResultado(p)) continue;
+          const gl = golesPartidoLocal(p);
+          const gv = golesPartidoVisitante(p);
           const direct =
             (p.equipo_local_id === aId && p.equipo_visitante_id === bId) ||
             (p.equipo_local_id === bId && p.equipo_visitante_id === aId);
           if (!direct) continue;
           const aLocal = p.equipo_local_id === aId;
-          const aGoals = aLocal ? p.goles_local : p.goles_visitante;
-          const bGoals = aLocal ? p.goles_visitante : p.goles_local;
+          const aGoals = aLocal ? gl : gv;
+          const bGoals = aLocal ? gv : gl;
           if (aGoals > bGoals) aPts += 3;
           else if (aGoals < bGoals) bPts += 3;
           else {
@@ -664,14 +667,16 @@ export default function ClasificacionesPage() {
         if (!excludeLastForBest || !rivalId) return { ...row };
         const out: StandingsRow = { ...row };
         for (const p of partidos) {
-          if (p.goles_local === null || p.goles_visitante === null) continue;
+          if (!partidoTieneResultado(p)) continue;
+          const gl = golesPartidoLocal(p);
+          const gv = golesPartidoVisitante(p);
           const affects =
             (p.equipo_local_id === row.id && p.equipo_visitante_id === rivalId) ||
             (p.equipo_local_id === rivalId && p.equipo_visitante_id === row.id);
           if (!affects) continue;
           const rowIsLocal = p.equipo_local_id === row.id;
-          const gf = rowIsLocal ? p.goles_local : p.goles_visitante;
-          const gc = rowIsLocal ? p.goles_visitante : p.goles_local;
+          const gf = rowIsLocal ? gl : gv;
+          const gc = rowIsLocal ? gv : gl;
           out.pj -= 1;
           out.gf -= gf;
           out.gc -= gc;

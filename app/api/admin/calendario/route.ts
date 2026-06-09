@@ -12,6 +12,7 @@ import {
   weekendFromStrings,
 } from "@/lib/server/parse-schedule-lines";
 import { syncKnockoutTeams } from "@/lib/server/resolve-knockout-teams";
+import { recalcPartidoStats } from "@/lib/server/recalc-partido-stats";
 
 type MatchPayload = {
   id?: string;
@@ -508,6 +509,8 @@ export async function POST(request: NextRequest) {
 
     let knockoutSync = null;
     if (estado === "finalizado") {
+      const recalc = await recalcPartidoStats(admin, body.id);
+      if (recalc.error) return NextResponse.json({ error: recalc.error }, { status: 400 });
       knockoutSync = await syncKnockoutTeams(admin);
     }
 
