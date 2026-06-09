@@ -48,6 +48,28 @@ function formatDayMonthInput(raw: string) {
   return `${digits.slice(0, 2)}/${digits.slice(2)}`;
 }
 
+function grupoFromFase(fase: string | null | undefined): string {
+  const m = (fase ?? "").match(/^Grupo\s+([A-Za-z0-9]+)/i);
+  return m?.[1]?.toUpperCase() ?? "";
+}
+
+type MatchSortMode = "hora-asc" | "hora-desc" | "grupo";
+
+function sortPartidos(list: Partido[], mode: MatchSortMode): Partido[] {
+  const sorted = [...list];
+  sorted.sort((a, b) => {
+    if (mode === "grupo") {
+      const gcmp = grupoFromFase(a.fase).localeCompare(grupoFromFase(b.fase), "es");
+      if (gcmp !== 0) return gcmp;
+    }
+    const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    const tb = b.fecha_hora ? new Date(b.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    if (mode === "hora-desc") return tb - ta;
+    return ta - tb;
+  });
+  return sorted;
+}
+
 export default function AdminCalendarioPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [rol, setRol] = useState<string | null>(null);
@@ -63,6 +85,9 @@ export default function AdminCalendarioPage() {
   const [scheduleYear, setScheduleYear] = useState("2026");
   const [applyingSchedule, setApplyingSchedule] = useState(false);
   const [scheduleResult, setScheduleResult] = useState("");
+  const [filterGrupo, setFilterGrupo] = useState("");
+  const [filterPista, setFilterPista] = useState("");
+  const [sortMode, setSortMode] = useState<MatchSortMode>("hora-asc");
   const [startDm, setStartDm] = useState("");
   const [startHm, setStartHm] = useState("18:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
@@ -356,6 +381,38 @@ export default function AdminCalendarioPage() {
   const groupLetters = Array.from(new Set(equipos.map((e) => (e.grupo ?? "").trim()).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b, "es"),
   );
+
+  const gruposEnPartidos = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of groupMatches) {
+      const g = grupoFromFase(p.fase);
+      if (g) set.add(g);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [groupMatches]);
+
+  const pistasEnPartidos = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of groupMatches) {
+      const name = (p.pista ?? "").trim();
+      if (name) set.add(name);
+    }
+    for (const pi of pistas) {
+      if (pi.nombre?.trim()) set.add(pi.nombre.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [groupMatches, pistas]);
+
+  const filteredGroupMatches = useMemo(() => {
+    let list = groupMatches;
+    if (filterGrupo) {
+      list = list.filter((p) => grupoFromFase(p.fase) === filterGrupo);
+    }
+    if (filterPista) {
+      list = list.filter((p) => (p.pista ?? "").trim() === filterPista);
+    }
+    return sortPartidos(list, sortMode);
+  }, [groupMatches, filterGrupo, filterPista, sortMode]);
   function parsePos(text: string | null | undefined) {
     return (text ?? "")
       .split(",")
@@ -699,14 +756,90 @@ export default function AdminCalendarioPage() {
 
         {tab === "calendario" || tab === "horarios" ? (
           <div className="rounded-xl border border-slate-200 p-4">
-            <p className="mb-2 font-semibold">Partidos de grupos</p>
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+              <p className="font-semibold">Partidos de grupos</p>
+              <p className="text-xs text-slate-600">
+                Mostrando {filteredGroupMatches.length} de {groupMatches.length}
+              </p>
+            </div>
+            <div className="mb-3 grid gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                Grupo
+                <select
+                  className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                  value={filterGrupo}
+                  onChange={(e) => setFilterGrupo(e.target.value)}
+                >
+                  <option value="">Todos los grupos</option>
+                  {gruposEnPartidos.map((g) => (
+                    <option key={g} value={g}>
+                      Grupo {g}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                Pista
+                <select
+                  className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                  value={filterPista}
+                  onChange={(e) => setFilterPista(e.target.value)}
+                >
+                  <option value="">Todas las pistas</option>
+                  {pistasEnPartidos.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                Ordenar por
+                <select
+                  className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as MatchSortMode)}
+                >
+                  <option value="hora-asc">Hora (mas pronto primero)</option>
+                  <option value="hora-desc">Hora (mas tarde primero)</option>
+                  <option value="grupo">Grupo (A→Z) y luego hora</option>
+                </select>
+              </label>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  onClick={() => {
+                    setFilterGrupo("");
+                    setFilterPista("");
+                    setSortMode("hora-asc");
+                  }}
+                >
+                  Quitar filtros
+                </button>
+              </div>
+            </div>
             <div className="grid gap-2">
-              {groupMatches.map((p) => (
-                <EditableMatchRow key={p.id} match={p} sideLabel={sideLabel} compactDate={compactDate} pistas={pistas} onSave={async (patch) => {
-                  await api({ action: "save_match", id: p.id, ...patch });
-                  await load();
-                }} />
-              ))}
+              {filteredGroupMatches.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+                  No hay partidos con estos filtros. Prueba otro grupo o pista.
+                </p>
+              ) : (
+                filteredGroupMatches.map((p) => (
+                  <EditableMatchRow
+                    key={p.id}
+                    match={p}
+                    sideLabel={sideLabel}
+                    compactDate={compactDate}
+                    pistas={pistas}
+                    grupoLabel={grupoFromFase(p.fase)}
+                    onSave={async (patch) => {
+                      await api({ action: "save_match", id: p.id, ...patch });
+                      await load();
+                    }}
+                  />
+                ))
+              )}
             </div>
           </div>
         ) : null}
@@ -826,12 +959,14 @@ function EditableMatchRow({
   sideLabel,
   compactDate,
   pistas,
+  grupoLabel,
   onSave,
 }: {
   match: Partido;
   sideLabel: (m: Partido, side: "local" | "visit") => string;
   compactDate: (iso: string | null) => string;
   pistas: Pista[];
+  grupoLabel?: string;
   onSave: (patch: Partial<Partido>) => Promise<void>;
 }) {
   const [diaMes, setDiaMes] = useState(
@@ -861,8 +996,18 @@ function EditableMatchRow({
   return (
     <div className="grid gap-2 rounded-lg border border-slate-200 p-2">
       <div className="text-sm">
-        <p className="font-semibold">{sideLabel(match, "local")} vs {sideLabel(match, "visit")}</p>
-        <p className="text-slate-600">{fase || match.fase || "—"} · {compactDate(match.fecha_hora)} · {estado || "pendiente"}</p>
+        <p className="font-semibold">
+          {grupoLabel ? (
+            <span className="mr-2 inline-block rounded bg-violet-100 px-1.5 py-0.5 text-xs font-bold text-violet-800">
+              G{grupoLabel}
+            </span>
+          ) : null}
+          {sideLabel(match, "local")} vs {sideLabel(match, "visit")}
+        </p>
+        <p className="text-slate-600">
+          {fase || match.fase || "—"} · {compactDate(match.fecha_hora)}
+          {pista ? ` · ${pista}` : ""} · {estado || "pendiente"}
+        </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-5">
         <input
