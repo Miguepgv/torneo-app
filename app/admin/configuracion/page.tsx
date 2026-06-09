@@ -584,18 +584,93 @@ export default function AdminConfiguracionPage() {
             <span>Para mejores segundos/terceros entre grupos desiguales: excluir resultado contra el ultimo del grupo grande</span>
           </label>
 
-          <label className="sm:col-span-2 text-sm font-semibold text-slate-700">Limite de cambios de jugadores (fecha/hora)</label>
-          <input
-            className="rounded-lg border border-slate-300 p-3 sm:col-span-2"
-            type="datetime-local"
-            value={cfg.limite_cambios_hasta ? cfg.limite_cambios_hasta.slice(0, 16) : ""}
-            onChange={(e) =>
-              setCfg((p) => ({
-                ...p,
-                limite_cambios_hasta: e.target.value ? new Date(e.target.value).toISOString() : null,
-              }))
-            }
-          />
+          <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 sm:col-span-2">
+            <p className="text-sm font-semibold text-violet-900">Inscripción de jugadores</p>
+            <p className="mt-1 text-xs text-violet-800">
+              Si el plazo ha pasado, nadie puede inscribirse con el enlace del equipo. Para dar de alta a alguien,
+              reabre el plazo aquí y pulsa <strong>Guardar configuración</strong>.
+            </p>
+
+            <label className="mt-3 flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={!cfg.limite_cambios_hasta}
+                onChange={(e) =>
+                  setCfg((p) => ({
+                    ...p,
+                    limite_cambios_hasta: e.target.checked ? null : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                  }))
+                }
+              />
+              <span className="text-sm text-slate-800">
+                Inscripciones abiertas <strong>sin fecha límite</strong>
+              </span>
+            </label>
+
+            {cfg.limite_cambios_hasta ? (
+              <>
+                <label className="mt-3 block text-sm font-semibold text-slate-700">
+                  Cierre de inscripciones (fecha y hora)
+                </label>
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-300 p-3"
+                  type="datetime-local"
+                  value={cfg.limite_cambios_hasta.slice(0, 16)}
+                  onChange={(e) =>
+                    setCfg((p) => ({
+                      ...p,
+                      limite_cambios_hasta: e.target.value ? new Date(e.target.value).toISOString() : null,
+                    }))
+                  }
+                />
+                <p className="mt-1 text-xs text-slate-600">
+                  Estado:{" "}
+                  {new Date(cfg.limite_cambios_hasta).getTime() <= Date.now() ? (
+                    <span className="font-semibold text-red-700">cerrado (plazo vencido)</span>
+                  ) : (
+                    <span className="font-semibold text-emerald-700">abierto hasta la fecha indicada</span>
+                  )}
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs font-semibold text-emerald-800">Inscripciones abiertas sin límite.</p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-violet-400 bg-white px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+                onClick={() =>
+                  setCfg((p) => ({
+                    ...p,
+                    limite_cambios_hasta: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                  }))
+                }
+              >
+                Reabrir 7 días
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-violet-400 bg-white px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100"
+                onClick={() =>
+                  setCfg((p) => ({
+                    ...p,
+                    limite_cambios_hasta: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
+                  }))
+                }
+              >
+                Reabrir 24 h
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                onClick={() => setCfg((p) => ({ ...p, limite_cambios_hasta: new Date().toISOString() }))}
+              >
+                Cerrar ya
+              </button>
+            </div>
+          </div>
 
           <button className="rounded-lg bg-violet-600 px-4 py-3 font-semibold text-white sm:col-span-2" type="submit" disabled={saving}>
             {saving ? "Guardando..." : "Guardar configuracion"}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { inscripcionCerradaPorPlazo } from "@/lib/server/inscripcion-plazo";
 import {
   buildJoinStoragePaths,
   makeJoinSafeName,
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
   const limite = (cfg as { limite_cambios_hasta?: string | null } | null)?.limite_cambios_hasta;
-  if (limite && new Date(limite).getTime() <= Date.now()) {
+  if (inscripcionCerradaPorPlazo(limite)) {
     return NextResponse.json(
       { error: "El plazo para modificar/inscribir jugadores ya ha finalizado." },
       { status: 400 },

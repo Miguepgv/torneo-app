@@ -245,13 +245,6 @@ export default function Home() {
               <p className="text-sm font-semibold text-slate-500">Ranking</p>
               <p className="mt-1 text-lg font-bold text-slate-900">Goleadores</p>
             </Link>
-            <Link
-              href="/incidencias"
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-md transition hover:border-violet-300 hover:shadow-lg"
-            >
-              <p className="text-sm font-semibold text-slate-500">Fair play</p>
-              <p className="mt-1 text-lg font-bold text-slate-900">Incidencias</p>
-            </Link>
           </div>
         </section>
 

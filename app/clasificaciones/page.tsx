@@ -890,7 +890,6 @@ export default function ClasificacionesPage() {
                           <th className={`${STICKY_HEAD} px-3 py-2`}>GF</th>
                           <th className={`${STICKY_HEAD} px-3 py-2`}>GC</th>
                           <th className={`${STICKY_HEAD} px-3 py-2`}>DG</th>
-                          <th className={`${STICKY_HEAD} px-3 py-2`}>FairPlay</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -908,7 +907,6 @@ export default function ClasificacionesPage() {
                               <td className="px-3 py-2 text-center">{r.gf}</td>
                               <td className="px-3 py-2 text-center">{r.gc}</td>
                               <td className="px-3 py-2 text-center">{r.dg}</td>
-                              <td className="px-3 py-2 text-center">{r.fairplay}</td>
                             </tr>
                           );
                         })}
