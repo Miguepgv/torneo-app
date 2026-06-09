@@ -382,10 +382,26 @@ export default function AdminDirectoPage() {
       },
       body: JSON.stringify({ action: "set_estado", id, estado }),
     });
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      knockout_sync?: { groupsComplete?: boolean; finalizedGroups?: string[]; updated?: number };
+    };
     if (!res.ok) {
       setMsg(json.error ?? "No se ha podido cambiar el estado del partido.");
       return false;
+    }
+    const koSync = json.knockout_sync;
+    if (estado === "finalizado" && koSync && (koSync.updated ?? 0) > 0) {
+      if (koSync.groupsComplete) {
+        setMsg(
+          `Fase de grupos completada: ${koSync.updated} plaza(s) del cuadro actualizadas (incluye mejores clasificados M2C, M3E…).`,
+        );
+      } else {
+        const gs = (koSync.finalizedGroups ?? []).join(", ");
+        setMsg(
+          `Grupo(s) finalizado(s) (${gs}): ${koSync.updated} plaza(s) del cuadro actualizadas. Los slots M (mejores 2.º/3.º) se completarán cuando acaben todos los grupos.`,
+        );
+      }
     }
     await load();
     return true;

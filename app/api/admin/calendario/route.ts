@@ -11,6 +11,7 @@ import {
   toIsoFromParts,
   weekendFromStrings,
 } from "@/lib/server/parse-schedule-lines";
+import { syncKnockoutTeams } from "@/lib/server/resolve-knockout-teams";
 
 type MatchPayload = {
   id?: string;
@@ -504,7 +505,13 @@ export async function POST(request: NextRequest) {
     if (!allowed.includes(estado)) return NextResponse.json({ error: "Estado no valido." }, { status: 400 });
     const up = await admin.from("partidos").update({ estado }).eq("id", body.id);
     if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
-    return NextResponse.json({ ok: true });
+
+    let knockoutSync = null;
+    if (estado === "finalizado") {
+      knockoutSync = await syncKnockoutTeams(admin);
+    }
+
+    return NextResponse.json({ ok: true, knockout_sync: knockoutSync });
   }
 
   if (body.action === "apply_schedule") {
