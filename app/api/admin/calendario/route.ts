@@ -3,8 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 import { TORNEO_COMPETICIONES, TORNEO_COMPETICION_KO_GENERICA } from "@/lib/torneo-constants";
 import {
   findTeamIdByName,
+  normalizePistaName,
   parseScheduleText,
   toIsoFromParts,
+  weekendFromStrings,
 } from "@/lib/server/parse-schedule-lines";
 
 type MatchPayload = {
@@ -50,7 +52,14 @@ type Body =
   | { action: "add_pista"; nombre?: string }
   | { action: "delete_pista"; id?: string }
   | { action: "set_estado"; id?: string; estado?: string }
-  | { action: "apply_schedule"; text?: string; year?: number };
+  | {
+      action: "apply_schedule";
+      text?: string;
+      year?: number;
+      weekendViernes?: string;
+      weekendSabado?: string;
+      weekendDomingo?: string;
+    };
 
 async function ensureStaff(request: NextRequest) {
   const token = (request.headers.get("authorization") ?? "").replace("Bearer ", "");
@@ -230,7 +239,7 @@ export async function POST(request: NextRequest) {
           toInsert.push({
             equipo_local_id: local,
             equipo_visitante_id: visit,
-            fase: `Grupo ${grupo} J${rIndex + 1}`,
+            fase: `Grupo ${grupo}`,
             estado: "pendiente",
             fecha_hora: dt,
             pista: body.pista?.trim() || null,
@@ -453,6 +462,11 @@ export async function POST(request: NextRequest) {
     const text = (body.text ?? "").trim();
     if (!text) return NextResponse.json({ error: "Pega el horario en el cuadro de texto." }, { status: 400 });
     const year = Number(body.year) || new Date().getFullYear();
+    const weekend = weekendFromStrings({
+      viernes: body.weekendViernes,
+      sabado: body.weekendSabado,
+      domingo: body.weekendDomingo,
+    });
 
     const [{ data: equipos, error: eErr }, { data: partidos, error: pErr }] = await Promise.all([
       admin.from("equipos").select("id,nombre"),
@@ -464,7 +478,7 @@ export async function POST(request: NextRequest) {
     if (pErr) return NextResponse.json({ error: pErr.message }, { status: 400 });
 
     const teamList = (equipos ?? []) as { id: string; nombre: string }[];
-    const parsed = parseScheduleText(text, year);
+    const parsed = parseScheduleText(text, year, weekend);
 
     let updated = 0;
     const skipped: string[] = [];
@@ -514,7 +528,8 @@ export async function POST(request: NextRequest) {
         year,
       );
       const patch: Record<string, unknown> = { fecha_hora: fechaIso };
-      if (row.line.pista) patch.pista = row.line.pista;
+      const pista = normalizePistaName(row.line.pista);
+      if (pista) patch.pista = pista;
 
       const up = await admin.from("partidos").update(patch).eq("id", candidates[0].id);
       if (up.error) {

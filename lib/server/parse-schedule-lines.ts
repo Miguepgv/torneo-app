@@ -12,6 +12,12 @@ export type ParsedScheduleLine =
   | { ok: true; line: ScheduleLineInput; raw: string }
   | { ok: false; raw: string; reason: string };
 
+export type WeekendDates = {
+  viernes: { day: number; month: number };
+  sabado: { day: number; month: number };
+  domingo: { day: number; month: number };
+};
+
 function normalizeTeamName(s: string): string {
   return s
     .normalize("NFD")
@@ -28,6 +34,34 @@ function nameTokens(s: string): string[] {
     .filter((t) => t.length > 1);
 }
 
+/** Nombres del PDF/horario → como suelen estar en la app (torneo 2026). */
+const IMPORT_TEAM_ALIASES: Record<string, string[]> = {
+  "a jerusalem contigo": ["a jerusalem contigo"],
+  "vera cruz f s": ["vera cruz fs", "vera cruz"],
+  "paz y esperanza": ["paz"],
+  "coronacion campillos": ["coronacion campillos"],
+  "los moraitos": ["los moraitos"],
+  "los quintos": ["los quintos f s", "los quintos"],
+  "tres caidas": ["tres caidas"],
+  "butaca del furraque": ["la butaca del furrque", "butaca del furrque"],
+  "acolitos de paco": ["los acolitos de paco", "acolitos de paco"],
+  "la agrupa": ["la agrupa f s", "la agrupa"],
+  "los remedios": ["los remedios"],
+  "costangeles": ["costangeles"],
+  "fernando guerrero": ["fernando guerrero"],
+  "los soleanos": ["los soleanos"],
+  "nazareno de utrera": ["nazareno de utrera"],
+  "boriquita de trajano": ["borriquita de trajano", "boriquita de trajano"],
+};
+
+function importNameVariants(name: string): string[] {
+  const n = normalizeTeamName(name);
+  const out = new Set<string>([n, name.trim()]);
+  const aliases = IMPORT_TEAM_ALIASES[n];
+  if (aliases) for (const a of aliases) out.add(a);
+  return [...out];
+}
+
 function nameMatchScore(target: string, candidate: string): number {
   const a = nameTokens(target);
   const b = nameTokens(candidate);
@@ -40,21 +74,99 @@ function nameMatchScore(target: string, candidate: string): number {
   return common / Math.max(a.length, b.length);
 }
 
-/** dd/mm/yyyy HH:mm o dd/mm HH:mm */
-function parseDateTime(raw: string, year: number): { day: number; month: number; hour: number; minute: number } | null {
-  const m = raw.trim().match(
-    /^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+(\d{1,2}):(\d{2})$/,
-  );
+/** Torneo nocturno: 1:00 = 01:00 de la madrugada, nunca 13:00. */
+function parseHourMinute(hm: string): { hour: number; minute: number } | null {
+  const m = hm.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+export function parseDayMonth(dm: string): { day: number; month: number } | null {
+  const m = dm.trim().match(/^(\d{1,2})[\/\-](\d{1,2})$/);
   if (!m) return null;
   const day = Number(m[1]);
   const month = Number(m[2]);
-  const hour = Number(m[4]);
-  const minute = Number(m[5]);
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
-  const y = m[3] ? Number(m[3].length === 2 ? `20${m[3]}` : m[3]) : year;
-  const d = new Date(y, month - 1, day, hour, minute, 0, 0);
-  if (Number.isNaN(d.getTime())) return null;
-  return { day, month, hour, minute };
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { day, month };
+}
+
+export function defaultWeekend2026(): WeekendDates {
+  return {
+    viernes: { day: 12, month: 6 },
+    sabado: { day: 13, month: 6 },
+    domingo: { day: 14, month: 6 },
+  };
+}
+
+export function weekendFromStrings(args: {
+  viernes?: string;
+  sabado?: string;
+  domingo?: string;
+  fallback?: WeekendDates;
+}): WeekendDates {
+  const fb = args.fallback ?? defaultWeekend2026();
+  const viernes = parseDayMonth(args.viernes ?? "") ?? fb.viernes;
+  const sabado = parseDayMonth(args.sabado ?? "") ?? fb.sabado;
+  const domingo = parseDayMonth(args.domingo ?? "") ?? fb.domingo;
+  return { viernes, sabado, domingo };
+}
+
+/** PDF: VIERNES 21:00 / SABADO 1:00 (madrugada tras el viernes). */
+function parsePdfDayTime(
+  raw: string,
+  weekend: WeekendDates,
+): { day: number; month: number; hour: number; minute: number } | null {
+  const m = raw
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .match(/^(VIERNES|SABADO|DOMINGO)\s+(\d{1,2}:\d{2})$/i);
+  if (!m) return null;
+
+  const hm = parseHourMinute(m[2]);
+  if (!hm) return null;
+
+  const dia = m[1].toUpperCase();
+  if (dia === "VIERNES") return { ...weekend.viernes, ...hm };
+  if (dia === "SABADO") return { ...weekend.sabado, ...hm };
+  if (dia === "DOMINGO") return { ...weekend.domingo, ...hm };
+  return null;
+}
+
+/** dd/mm HH:mm — hora en formato 24h peninsular. */
+function parseDateTime(
+  raw: string,
+  year: number,
+): { day: number; month: number; hour: number; minute: number } | null {
+  const m = raw.trim().match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+(\d{1,2}:\d{2})$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const hm = parseHourMinute(m[4]);
+  if (!hm) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { day, month, ...hm };
+}
+
+function parseWhen(
+  raw: string,
+  year: number,
+  weekend: WeekendDates,
+): { day: number; month: number; hour: number; minute: number } | null {
+  return parsePdfDayTime(raw, weekend) ?? parseDateTime(raw, year);
+}
+
+/** C / B / A del PDF → Pista C */
+export function normalizePistaName(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim();
+  if (!t) return null;
+  if (/^pista\s+/i.test(t)) return t.replace(/\s+/g, " ");
+  if (/^[ABC]$/i.test(t)) return `Pista ${t.toUpperCase()}`;
+  return t;
 }
 
 function splitTeams(part: string): { local: string; visit: string } | null {
@@ -75,8 +187,17 @@ function splitTeams(part: string): { local: string; visit: string } | null {
   return null;
 }
 
-/** Una linea: "Equipo A vs Equipo B | 27/05 18:00 | Pista 1" */
-export function parseScheduleLine(raw: string, year: number): ParsedScheduleLine {
+/**
+ * Formatos:
+ * - Local vs Visit | VIERNES 21:00 | C
+ * - Local vs Visit | SABADO 1:00 | Pista B  (01:00 madrugada, no 13:00)
+ * - Local vs Visit | 13/06 01:00 | Pista C
+ */
+export function parseScheduleLine(
+  raw: string,
+  year: number,
+  weekend: WeekendDates = defaultWeekend2026(),
+): ParsedScheduleLine {
   const line = raw.trim();
   if (!line || line.startsWith("#")) {
     return { ok: false, raw: line, reason: "Linea vacia" };
@@ -85,8 +206,8 @@ export function parseScheduleLine(raw: string, year: number): ParsedScheduleLine
   const pipeParts = line.split("|").map((p) => p.trim());
   if (pipeParts.length >= 2) {
     const teams = splitTeams(pipeParts[0]);
-    const dt = parseDateTime(pipeParts[1], year);
-    const pista = pipeParts[2]?.trim() || null;
+    const dt = parseWhen(pipeParts[1], year, weekend);
+    const pista = normalizePistaName(pipeParts[2]);
     if (teams && dt) {
       return {
         ok: true,
@@ -104,8 +225,8 @@ export function parseScheduleLine(raw: string, year: number): ParsedScheduleLine
   const tabParts = line.split("\t").map((p) => p.trim()).filter(Boolean);
   if (tabParts.length >= 3) {
     const teams = splitTeams(tabParts[0]);
-    const dt = parseDateTime(`${tabParts[1]} ${tabParts[2]}`, year);
-    const pista = tabParts[3]?.trim() || null;
+    const dt = parseWhen(`${tabParts[1]} ${tabParts[2]}`, year, weekend) ?? parseWhen(tabParts[1], year, weekend);
+    const pista = normalizePistaName(tabParts[3]);
     if (teams && dt) {
       return {
         ok: true,
@@ -115,45 +236,30 @@ export function parseScheduleLine(raw: string, year: number): ParsedScheduleLine
     }
   }
 
-  const loose = line.match(
-    /^(.+?)\s+vs\.?\s+(.+?)\s+(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)\s+(\d{1,2}:\d{2})(?:\s+(.+))?$/i,
-  );
-  if (loose) {
-    const dt = parseDateTime(`${loose[3]} ${loose[4]}`, year);
-    if (dt) {
-      return {
-        ok: true,
-        raw: line,
-        line: {
-          localName: loose[1].trim(),
-          visitName: loose[2].trim(),
-          ...dt,
-          pista: loose[5]?.trim() || null,
-        },
-      };
-    }
-  }
-
   return {
     ok: false,
     raw: line,
-    reason: "Formato no reconocido (usa: Local vs Visitante | dd/mm HH:mm | Pista)",
+    reason:
+      "Formato no reconocido (usa: Local vs Visit | VIERNES 21:00 | C o | 13/06 01:00 | Pista B)",
   };
 }
 
-export function parseScheduleText(text: string, year: number): ParsedScheduleLine[] {
+export function parseScheduleText(
+  text: string,
+  year: number,
+  weekend: WeekendDates = defaultWeekend2026(),
+): ParsedScheduleLine[] {
   return text
     .split(/\r?\n/)
     .map((raw) => raw.trim())
     .filter((raw) => raw.length > 0 && !raw.startsWith("#"))
-    .map((raw) => parseScheduleLine(raw, year));
+    .map((raw) => parseScheduleLine(raw, year, weekend));
 }
 
-export function findTeamIdByName(
+function findTeamIdByNormalized(
   equipos: { id: string; nombre: string }[],
-  name: string,
+  target: string,
 ): string | null {
-  const target = normalizeTeamName(name);
   if (!target) return null;
 
   const exact = equipos.find((e) => normalizeTeamName(e.nombre) === target);
@@ -165,6 +271,18 @@ export function findTeamIdByName(
   });
   if (contains.length === 1) return contains[0].id;
 
+  return null;
+}
+
+export function findTeamIdByName(
+  equipos: { id: string; nombre: string }[],
+  name: string,
+): string | null {
+  for (const variant of importNameVariants(name)) {
+    const id = findTeamIdByNormalized(equipos, normalizeTeamName(variant));
+    if (id) return id;
+  }
+
   let bestId: string | null = null;
   let bestScore = 0;
   for (const e of equipos) {
@@ -172,16 +290,25 @@ export function findTeamIdByName(
     if (score > bestScore) {
       bestScore = score;
       bestId = e.id;
-    } else if (score === bestScore && score >= 0.55) {
+    } else if (score === bestScore && score >= 0.5) {
       bestId = null;
     }
   }
-  if (bestId && bestScore >= 0.55) return bestId;
+  if (bestId && bestScore >= 0.5) return bestId;
   return null;
 }
 
-export function toIsoFromParts(day: number, month: number, hour: number, minute: number, year: number): string {
-  return new Date(year, month - 1, day, hour, minute, 0, 0).toISOString();
+/** Hora del torneo en Espana (junio = CEST +02:00). Evita desfases en Vercel (UTC). */
+export function toIsoFromParts(
+  day: number,
+  month: number,
+  hour: number,
+  minute: number,
+  year: number,
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offset = month >= 4 && month <= 10 ? "+02:00" : "+01:00";
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:00${offset}`;
 }
 
 export { normalizeTeamName };

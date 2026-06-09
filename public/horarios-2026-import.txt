@@ -1,24 +1,24 @@
-A JERUSALEM CONTIGO vs VERA CRUZ F.S | 12/06 21:00 | Pista C
-A JERUSALEM CONTIGO vs PAZ Y ESPERANZA | 13/06 01:00 | Pista B
-VERA CRUZ F.S vs PAZ Y ESPERANZA | 13/06 05:00 | Pista C
-CORONACION CAMPILLOS vs VERA CRUZ F.S | 13/06 19:00 | Pista C
-A JERUSALEM CONTIGO vs CORONACION CAMPILLOS | 13/06 21:00 | Pista A
-PAZ Y ESPERANZA vs CORONACION CAMPILLOS | 13/06 23:00 | Pista C
-LOS MORAITOS vs LOS QUINTOS | 12/06 22:00 | Pista C
-TRES CAIDAS vs BUTACA DEL FURRAQUE | 12/06 22:00 | Pista B
-LOS MORAITOS vs TRES CAIDAS | 13/06 02:00 | Pista C
-LOS QUINTOS vs BUTACA DEL FURRAQUE | 13/06 02:00 | Pista B
-LOS MORAITOS vs BUTACA DEL FURRAQUE | 13/06 20:00 | Pista C
-TRES CAIDAS vs LOS QUINTOS | 13/06 20:00 | Pista B
-ACOLITOS DE PACO vs LA AGRUPA | 12/06 23:00 | Pista B
-LOS REMEDIOS vs COSTANGELES | 12/06 23:00 | Pista C
-COSTANGELES vs LA AGRUPA | 13/06 03:00 | Pista B
-ACOLITOS DE PACO vs LOS REMEDIOS | 13/06 03:00 | Pista C
-ACOLITOS DE PACO vs COSTANGELES | 13/06 21:00 | Pista B
-LA AGRUPA vs LOS REMEDIOS | 13/06 21:00 | Pista C
-FERNANDO GUERRERO vs LOS SOLEANOS | 13/06 00:00 | Pista C
-NAZARENO DE UTRERA vs BORIQUITA DE TRAJANO | 13/06 00:00 | Pista B
-FERNANDO GUERRERO vs NAZARENO DE UTRERA | 13/06 04:00 | Pista C
-LOS SOLEANOS vs BORIQUITA DE TRAJANO | 13/06 04:00 | Pista B
-FERNANDO GUERRERO vs BORIQUITA DE TRAJANO | 13/06 22:00 | Pista C
-LOS SOLEANOS vs NAZARENO DE UTRERA | 13/06 22:00 | Pista B
+A Jerusalem Contigo vs Vera Cruz FS | VIERNES 21:00 | C
+A Jerusalem Contigo vs Paz | SABADO 1:00 | B
+Vera Cruz FS vs Paz | SABADO 5:00 | C
+Coronacion Campillos vs Vera Cruz FS | SABADO 19:00 | C
+A Jerusalem Contigo vs Coronacion Campillos | SABADO 21:00 | A
+Paz vs Coronacion Campillos | SABADO 23:00 | C
+Los Moraitos vs Los Quintos F.S | VIERNES 22:00 | C
+Tres Caidas vs La Butaca del Furrque | VIERNES 22:00 | B
+Los Moraitos vs Tres Caidas | SABADO 2:00 | C
+Los Quintos F.S vs La Butaca del Furrque | SABADO 2:00 | B
+Los Moraitos vs La Butaca del Furrque | SABADO 20:00 | C
+Tres Caidas vs Los Quintos F.S | SABADO 20:00 | B
+Los Acólitos de Paco vs La Agrupa F.S | VIERNES 23:00 | B
+Los Remedios vs Costangeles | VIERNES 23:00 | C
+Costangeles vs La Agrupa F.S | SABADO 3:00 | B
+Los Acólitos de Paco vs Los Remedios | SABADO 3:00 | C
+Los Acólitos de Paco vs Costangeles | SABADO 21:00 | B
+La Agrupa F.S vs Los Remedios | SABADO 21:00 | C
+Fernando Guerrero vs Los Soleanos | SABADO 0:00 | C
+Nazareno de Utrera vs Borriquita de Trajano | SABADO 0:00 | B
+Fernando Guerrero vs Nazareno de Utrera | SABADO 4:00 | C
+Los Soleanos vs Borriquita de Trajano | SABADO 4:00 | B
+Fernando Guerrero vs Borriquita de Trajano | SABADO 22:00 | C
+Los Soleanos vs Nazareno de Utrera | SABADO 22:00 | B

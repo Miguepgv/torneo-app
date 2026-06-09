@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { toIsoFromParts } from "@/lib/server/parse-schedule-lines";
 import { TORNEO_COMPETICIONES, tituloCompeticionMostrar } from "@/lib/torneo-constants";
 
 type Equipo = { id: string; nombre: string; grupo?: string | null };
@@ -53,13 +54,99 @@ function grupoFromFase(fase: string | null | undefined): string {
   return m?.[1]?.toUpperCase() ?? "";
 }
 
+const MADRID_TZ = "Europe/Madrid";
+
+function faseCorta(fase: string | null | undefined): string {
+  const g = grupoFromFase(fase);
+  if (g) return `Grupo ${g}`;
+  return (fase ?? "").trim() || "—";
+}
+
+function datePartsMadrid(iso: string) {
+  const d = new Date(iso);
+  return {
+    dm: d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", timeZone: MADRID_TZ }),
+    hm: d.toLocaleTimeString("es-ES", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: MADRID_TZ,
+    }),
+    year:
+      Number(d.toLocaleDateString("en-CA", { year: "numeric", timeZone: MADRID_TZ })) || 2026,
+  };
+}
+
+function tournamentYearFromIso(iso: string | null, fallback = 2026): number {
+  if (!iso) return fallback;
+  return datePartsMadrid(iso).year || fallback;
+}
+
 type MatchSortMode = "hora-asc" | "hora-desc" | "grupo";
+type KnockoutSortMode = MatchSortMode | "competicion";
+
+function slotGrupoLetter(slot: string | null | undefined): string {
+  const m = (slot ?? "").trim().match(/([A-Za-z])$/);
+  return m?.[1]?.toUpperCase() ?? "";
+}
+
+function partidoGruposTouch(
+  match: Partido,
+  equipos: Equipo[],
+): string[] {
+  const set = new Set<string>();
+  const sl = slotGrupoLetter(match.slot_local);
+  const sv = slotGrupoLetter(match.slot_visitante);
+  if (sl) set.add(sl);
+  if (sv) set.add(sv);
+  for (const id of [match.equipo_local_id, match.equipo_visitante_id]) {
+    if (!id) continue;
+    const g = (equipos.find((e) => e.id === id)?.grupo ?? "").trim().toUpperCase();
+    if (g) set.add(g);
+  }
+  return [...set];
+}
+
+function partidoGrupoSortKey(match: Partido, equipos: Equipo[]): string {
+  const gs = partidoGruposTouch(match, equipos).sort((a, b) => a.localeCompare(b, "es"));
+  return gs[0] ?? "Z";
+}
 
 function sortPartidos(list: Partido[], mode: MatchSortMode): Partido[] {
   const sorted = [...list];
   sorted.sort((a, b) => {
     if (mode === "grupo") {
       const gcmp = grupoFromFase(a.fase).localeCompare(grupoFromFase(b.fase), "es");
+      if (gcmp !== 0) return gcmp;
+    }
+    const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    const tb = b.fecha_hora ? new Date(b.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    if (mode === "hora-desc") return tb - ta;
+    return ta - tb;
+  });
+  return sorted;
+}
+
+function sortKnockoutPartidos(
+  list: Partido[],
+  mode: KnockoutSortMode,
+  equipos: Equipo[],
+): Partido[] {
+  const sorted = [...list];
+  sorted.sort((a, b) => {
+    if (mode === "competicion") {
+      const ccmp = tituloCompeticionMostrar(a.competicion).localeCompare(
+        tituloCompeticionMostrar(b.competicion),
+        "es",
+      );
+      if (ccmp !== 0) return ccmp;
+      const rcmp = roundRank(a.ronda ?? "") - roundRank(b.ronda ?? "");
+      if (rcmp !== 0) return rcmp;
+      const ocmp = Number(a.orden ?? 0) - Number(b.orden ?? 0);
+      if (ocmp !== 0) return ocmp;
+    }
+    if (mode === "grupo") {
+      const gcmp = partidoGrupoSortKey(a, equipos).localeCompare(partidoGrupoSortKey(b, equipos), "es");
       if (gcmp !== 0) return gcmp;
     }
     const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
@@ -83,11 +170,18 @@ export default function AdminCalendarioPage() {
   const [msg, setMsg] = useState("");
   const [scheduleText, setScheduleText] = useState("");
   const [scheduleYear, setScheduleYear] = useState("2026");
+  const [weekendViernes, setWeekendViernes] = useState("12/06");
+  const [weekendSabado, setWeekendSabado] = useState("13/06");
+  const [weekendDomingo, setWeekendDomingo] = useState("14/06");
   const [applyingSchedule, setApplyingSchedule] = useState(false);
   const [scheduleResult, setScheduleResult] = useState("");
   const [filterGrupo, setFilterGrupo] = useState("");
   const [filterPista, setFilterPista] = useState("");
   const [sortMode, setSortMode] = useState<MatchSortMode>("hora-asc");
+  const [filterKnockoutCompeticion, setFilterKnockoutCompeticion] = useState("");
+  const [filterKnockoutGrupo, setFilterKnockoutGrupo] = useState("");
+  const [filterKnockoutPista, setFilterKnockoutPista] = useState("");
+  const [sortKnockoutMode, setSortKnockoutMode] = useState<KnockoutSortMode>("hora-asc");
   const [startDm, setStartDm] = useState("");
   const [startHm, setStartHm] = useState("18:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
@@ -254,6 +348,9 @@ export default function AdminCalendarioPage() {
         action: "apply_schedule",
         text: scheduleText,
         year: Number(scheduleYear) || 2026,
+        weekendViernes,
+        weekendSabado,
+        weekendDomingo,
       })) as {
         updated?: number;
         skipped?: string[];
@@ -356,24 +453,20 @@ export default function AdminCalendarioPage() {
 
   function compactDate(iso: string | null) {
     if (!iso) return "Sin fecha";
-    const d = new Date(iso);
-    const dm = d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
-    const hm = d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    const { dm, hm } = datePartsMadrid(iso);
     return `${dm} ${hm}`;
   }
 
-  function toIsoFromDayMonth(dm: string, hm: string) {
+  function toIsoFromDayMonth(dm: string, hm: string, year = Number(scheduleYear) || 2026) {
     const m = dm.trim().match(/^(\d{1,2})\/(\d{1,2})$/);
     const t = hm.trim().match(/^(\d{1,2}):(\d{2})$/);
     if (!m || !t) return null;
-    const year = new Date().getFullYear();
     const day = Number(m[1]);
     const month = Number(m[2]);
-    const hh = Number(t[1]);
-    const mm = Number(t[2]);
-    const d = new Date(year, month - 1, day, hh, mm, 0, 0);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString();
+    const hour = Number(t[1]);
+    const minute = Number(t[2]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+    return toIsoFromParts(day, month, hour, minute, year);
   }
 
   const groupMatches = partidos.filter((p) => (p.fase ?? "").startsWith("Grupo "));
@@ -413,6 +506,57 @@ export default function AdminCalendarioPage() {
     }
     return sortPartidos(list, sortMode);
   }, [groupMatches, filterGrupo, filterPista, sortMode]);
+
+  const competicionesEnCruces = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of knockoutMatches) {
+      set.add(tituloCompeticionMostrar(p.competicion));
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [knockoutMatches]);
+
+  const gruposEnCruces = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of knockoutMatches) {
+      for (const g of partidoGruposTouch(p, equipos)) set.add(g);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [knockoutMatches, equipos]);
+
+  const pistasEnCruces = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of knockoutMatches) {
+      const name = (p.pista ?? "").trim();
+      if (name) set.add(name);
+    }
+    for (const pi of pistas) {
+      if (pi.nombre?.trim()) set.add(pi.nombre.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "es"));
+  }, [knockoutMatches, pistas]);
+
+  const filteredKnockoutMatches = useMemo(() => {
+    let list = knockoutMatches;
+    if (filterKnockoutCompeticion) {
+      list = list.filter(
+        (p) => tituloCompeticionMostrar(p.competicion) === filterKnockoutCompeticion,
+      );
+    }
+    if (filterKnockoutGrupo) {
+      list = list.filter((p) => partidoGruposTouch(p, equipos).includes(filterKnockoutGrupo));
+    }
+    if (filterKnockoutPista) {
+      list = list.filter((p) => (p.pista ?? "").trim() === filterKnockoutPista);
+    }
+    return sortKnockoutPartidos(list, sortKnockoutMode, equipos);
+  }, [
+    knockoutMatches,
+    equipos,
+    filterKnockoutCompeticion,
+    filterKnockoutGrupo,
+    filterKnockoutPista,
+    sortKnockoutMode,
+  ]);
   function parsePos(text: string | null | undefined) {
     return (text ?? "")
       .split(",")
@@ -705,13 +849,17 @@ export default function AdminCalendarioPage() {
           <div className="rounded-xl border border-slate-200 p-4">
             <p className="mb-2 font-semibold">Importar fecha y hora de partidos</p>
             <p className="mb-3 text-sm text-slate-600">
-              Pega una linea por partido. Los nombres deben coincidir con los equipos en la app.
-              Despues puedes corregir cualquier partido a mano en la lista de abajo.
+              Pega una linea por partido (como en el PDF). Los nombres deben coincidir con los equipos en la app.
+              El orden cronologico lo marca la hora; no hace falta poner jornada.
+            </p>
+            <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
+              Torneo nocturno: <strong>SABADO 1:00</strong> es la madrugada del viernes al sabado (01:00), no las 13:00.
+              La pista va con letra: A, B o C.
             </p>
             <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
-              Equipo Local vs Equipo Visitante | 27/05 18:00 | Pista 1
+              Equipo Local vs Equipo Visitante | VIERNES 21:00 | C
             </p>
-            <div className="mb-2 flex flex-wrap gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <input
                 className="w-28 rounded-lg border border-slate-300 p-2 text-sm"
                 type="number"
@@ -721,6 +869,33 @@ export default function AdminCalendarioPage() {
                 onChange={(e) => setScheduleYear(e.target.value)}
                 placeholder="Ano"
               />
+              <label className="text-xs text-slate-600">
+                Viernes
+                <input
+                  className="ml-1 w-20 rounded-lg border border-slate-300 p-2 text-sm"
+                  value={weekendViernes}
+                  onChange={(e) => setWeekendViernes(e.target.value)}
+                  placeholder="12/06"
+                />
+              </label>
+              <label className="text-xs text-slate-600">
+                Sabado
+                <input
+                  className="ml-1 w-20 rounded-lg border border-slate-300 p-2 text-sm"
+                  value={weekendSabado}
+                  onChange={(e) => setWeekendSabado(e.target.value)}
+                  placeholder="13/06"
+                />
+              </label>
+              <label className="text-xs text-slate-600">
+                Domingo
+                <input
+                  className="ml-1 w-20 rounded-lg border border-slate-300 p-2 text-sm"
+                  value={weekendDomingo}
+                  onChange={(e) => setWeekendDomingo(e.target.value)}
+                  placeholder="14/06"
+                />
+              </label>
               <button
                 className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-800"
                 type="button"
@@ -888,51 +1063,174 @@ export default function AdminCalendarioPage() {
             </form>
 
             <div className="rounded-xl border border-slate-200 p-4">
-              <p className="mb-2 font-semibold">Brackets (cuadro)</p>
-              <div className="grid gap-4">
-                {Array.from(
-                  knockoutMatches.reduce((acc, m) => {
-                    const c = m.competicion ?? "General";
-                    if (!acc.has(c)) acc.set(c, []);
-                    acc.get(c)?.push(m);
-                    return acc;
-                  }, new Map<string, Partido[]>()),
-                ).map(([comp, matches]) => (
-                  <div key={comp} className="rounded-lg border border-slate-200 p-3">
-                    <p className="mb-2 text-sm font-semibold text-violet-800">{tituloCompeticionMostrar(comp)}</p>
-                    <div className="overflow-x-auto">
-                      <div className="flex min-w-max gap-6">
-                        {Array.from(
-                          matches.reduce((acc, m) => {
-                            const r = m.ronda ?? "Ronda";
-                            if (!acc.has(r)) acc.set(r, []);
-                            acc.get(r)?.push(m);
-                            return acc;
-                          }, new Map<string, Partido[]>()),
-                        )
-                          .sort(([a], [b]) => roundRank(a) - roundRank(b))
-                          .map(([round, roundMatches], roundIdx) => (
-                            <div key={`${comp}-${round}`} className="w-[320px]">
-                              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">{round}</p>
-                              <div className="grid gap-3">
-                                {roundMatches
-                                  .sort((a, b) => Number(a.orden ?? 0) - Number(b.orden ?? 0))
-                                  .map((p, i) => (
-                                    <div key={p.id} style={{ marginTop: roundIdx === 0 ? 0 : `${i * 28}px` }}>
-                                      <EditableMatchRow match={p} sideLabel={sideLabel} compactDate={compactDate} pistas={pistas} onSave={async (patch) => {
-                                        await api({ action: "save_match", id: p.id, ...patch });
-                                        await load();
-                                      }} />
-                                    </div>
-                                  ))}
-                              </div>
-                            </div>
-                          ))}
-                      </div>
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                <p className="font-semibold">Cruces y brackets</p>
+                <p className="text-xs text-slate-600">
+                  Mostrando {filteredKnockoutMatches.length} de {knockoutMatches.length}
+                </p>
+              </div>
+              <div className="mb-3 grid gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+                <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                  Competicion
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                    value={filterKnockoutCompeticion}
+                    onChange={(e) => setFilterKnockoutCompeticion(e.target.value)}
+                  >
+                    <option value="">Todas</option>
+                    {competicionesEnCruces.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                  Grupo
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                    value={filterKnockoutGrupo}
+                    onChange={(e) => setFilterKnockoutGrupo(e.target.value)}
+                  >
+                    <option value="">Todos</option>
+                    {gruposEnCruces.map((g) => (
+                      <option key={g} value={g}>
+                        Grupo {g}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                  Pista
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                    value={filterKnockoutPista}
+                    onChange={(e) => setFilterKnockoutPista(e.target.value)}
+                  >
+                    <option value="">Todas</option>
+                    {pistasEnCruces.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-slate-700">
+                  Ordenar por
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white p-2 text-sm font-normal"
+                    value={sortKnockoutMode}
+                    onChange={(e) => setSortKnockoutMode(e.target.value as KnockoutSortMode)}
+                  >
+                    <option value="hora-asc">Hora (mas pronto primero)</option>
+                    <option value="hora-desc">Hora (mas tarde primero)</option>
+                    <option value="grupo">Grupo (A→Z) y luego hora</option>
+                    <option value="competicion">Competicion, ronda y hora</option>
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    onClick={() => {
+                      setFilterKnockoutCompeticion("");
+                      setFilterKnockoutGrupo("");
+                      setFilterKnockoutPista("");
+                      setSortKnockoutMode("hora-asc");
+                    }}
+                  >
+                    Quitar filtros
+                  </button>
+                </div>
+              </div>
+
+              {filteredKnockoutMatches.length === 0 ? (
+                <p className="mb-4 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
+                  No hay cruces con estos filtros.
+                </p>
+              ) : (
+                <>
+                  <div className="mb-4 rounded-lg border border-violet-100 bg-violet-50/50 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">
+                      Listado por hora
+                    </p>
+                    <div className="grid gap-2">
+                      {filteredKnockoutMatches.map((p) => (
+                        <EditableMatchRow
+                          key={`list-${p.id}`}
+                          match={p}
+                          sideLabel={sideLabel}
+                          compactDate={compactDate}
+                          pistas={pistas}
+                          grupoLabel={partidoGruposTouch(p, equipos)[0]}
+                          onSave={async (patch) => {
+                            await api({ action: "save_match", id: p.id, ...patch });
+                            await load();
+                          }}
+                        />
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <p className="mb-2 text-sm font-semibold text-slate-800">Brackets (cuadro)</p>
+                  <div className="grid gap-4">
+                    {Array.from(
+                      filteredKnockoutMatches.reduce((acc, m) => {
+                        const c = m.competicion ?? "General";
+                        if (!acc.has(c)) acc.set(c, []);
+                        acc.get(c)?.push(m);
+                        return acc;
+                      }, new Map<string, Partido[]>()),
+                    ).map(([comp, matches]) => (
+                      <div key={comp} className="rounded-lg border border-slate-200 p-3">
+                        <p className="mb-2 text-sm font-semibold text-violet-800">
+                          {tituloCompeticionMostrar(comp)}
+                        </p>
+                        <div className="overflow-x-auto">
+                          <div className="flex min-w-max gap-6">
+                            {Array.from(
+                              matches.reduce((acc, m) => {
+                                const r = m.ronda ?? "Ronda";
+                                if (!acc.has(r)) acc.set(r, []);
+                                acc.get(r)?.push(m);
+                                return acc;
+                              }, new Map<string, Partido[]>()),
+                            )
+                              .sort(([a], [b]) => roundRank(a) - roundRank(b))
+                              .map(([round, roundMatches], roundIdx) => (
+                                <div key={`${comp}-${round}`} className="w-[320px]">
+                                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                    {round}
+                                  </p>
+                                  <div className="grid gap-3">
+                                    {sortKnockoutPartidos(roundMatches, sortKnockoutMode, equipos).map((p, i) => (
+                                      <div
+                                        key={p.id}
+                                        style={{ marginTop: roundIdx === 0 ? 0 : `${i * 28}px` }}
+                                      >
+                                        <EditableMatchRow
+                                          match={p}
+                                          sideLabel={sideLabel}
+                                          compactDate={compactDate}
+                                          pistas={pistas}
+                                          grupoLabel={partidoGruposTouch(p, equipos)[0]}
+                                          onSave={async (patch) => {
+                                            await api({ action: "save_match", id: p.id, ...patch });
+                                            await load();
+                                          }}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </>
         ) : null}
@@ -969,16 +1267,9 @@ function EditableMatchRow({
   grupoLabel?: string;
   onSave: (patch: Partial<Partido>) => Promise<void>;
 }) {
-  const [diaMes, setDiaMes] = useState(
-    match.fecha_hora
-      ? new Date(match.fecha_hora).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })
-      : "",
-  );
-  const [hora, setHora] = useState(
-    match.fecha_hora
-      ? new Date(match.fecha_hora).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })
-      : "",
-  );
+  const madridInit = match.fecha_hora ? datePartsMadrid(match.fecha_hora) : null;
+  const [diaMes, setDiaMes] = useState(madridInit?.dm ?? "");
+  const [hora, setHora] = useState(madridInit?.hm ?? "");
   const [pista, setPista] = useState(match.pista ?? "");
   const [fase, setFase] = useState(match.fase ?? "");
   const [estado, setEstado] = useState(match.estado ?? "");
@@ -987,10 +1278,13 @@ function EditableMatchRow({
     const m = dm.trim().match(/^(\d{1,2})\/(\d{1,2})$/);
     const t = hm.trim().match(/^(\d{1,2}):(\d{2})$/);
     if (!m || !t) return null;
-    const year = new Date().getFullYear();
-    const d = new Date(year, Number(m[2]) - 1, Number(m[1]), Number(t[1]), Number(t[2]), 0, 0);
-    if (Number.isNaN(d.getTime())) return null;
-    return d.toISOString();
+    const year = tournamentYearFromIso(match.fecha_hora);
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    const hour = Number(t[1]);
+    const minute = Number(t[2]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+    return toIsoFromParts(day, month, hour, minute, year);
   }
 
   return (
@@ -1005,7 +1299,7 @@ function EditableMatchRow({
           {sideLabel(match, "local")} vs {sideLabel(match, "visit")}
         </p>
         <p className="text-slate-600">
-          {fase || match.fase || "—"} · {compactDate(match.fecha_hora)}
+          {faseCorta(fase || match.fase)} · {compactDate(match.fecha_hora)}
           {pista ? ` · ${pista}` : ""} · {estado || "pendiente"}
         </p>
       </div>

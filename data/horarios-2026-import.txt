@@ -1,35 +1,26 @@
-# XI Torneo Cofrade — VIERNES 12/06 · SABADO 13/06 · DOMINGO 14/06/2026
-# Pegar en Admin → Calendario → Importar horarios (ano 2026)
-# Antes: generar calendario de grupos + pistas A, B y C
+# Nombres como en la app (capturas equipos). Fechas: 12-14 junio 2026.
 
-# --- GRUPO A ---
-A JERUSALEM CONTIGO vs VERA CRUZ F.S | 12/06 21:00 | Pista C
-A JERUSALEM CONTIGO vs PAZ Y ESPERANZA | 13/06 01:00 | Pista B
-VERA CRUZ F.S vs PAZ Y ESPERANZA | 13/06 05:00 | Pista C
-CORONACION CAMPILLOS vs VERA CRUZ F.S | 13/06 19:00 | Pista C
-A JERUSALEM CONTIGO vs CORONACION CAMPILLOS | 13/06 21:00 | Pista A
-PAZ Y ESPERANZA vs CORONACION CAMPILLOS | 13/06 23:00 | Pista C
-
-# --- GRUPO B ---
-LOS MORAITOS vs LOS QUINTOS | 12/06 22:00 | Pista C
-TRES CAIDAS vs BUTACA DEL FURRAQUE | 12/06 22:00 | Pista B
-LOS MORAITOS vs TRES CAIDAS | 13/06 02:00 | Pista C
-LOS QUINTOS vs BUTACA DEL FURRAQUE | 13/06 02:00 | Pista B
-LOS MORAITOS vs BUTACA DEL FURRAQUE | 13/06 20:00 | Pista C
-TRES CAIDAS vs LOS QUINTOS | 13/06 20:00 | Pista B
-
-# --- GRUPO C ---
-ACOLITOS DE PACO vs LA AGRUPA | 12/06 23:00 | Pista B
-LOS REMEDIOS vs COSTANGELES | 12/06 23:00 | Pista C
-COSTANGELES vs LA AGRUPA | 13/06 03:00 | Pista B
-ACOLITOS DE PACO vs LOS REMEDIOS | 13/06 03:00 | Pista C
-ACOLITOS DE PACO vs COSTANGELES | 13/06 21:00 | Pista B
-LA AGRUPA vs LOS REMEDIOS | 13/06 21:00 | Pista C
-
-# --- GRUPO D ---
-FERNANDO GUERRERO vs LOS SOLEANOS | 13/06 00:00 | Pista C
-NAZARENO DE UTRERA vs BORIQUITA DE TRAJANO | 13/06 00:00 | Pista B
-FERNANDO GUERRERO vs NAZARENO DE UTRERA | 13/06 04:00 | Pista C
-LOS SOLEANOS vs BORIQUITA DE TRAJANO | 13/06 04:00 | Pista B
-FERNANDO GUERRERO vs BORIQUITA DE TRAJANO | 13/06 22:00 | Pista C
-LOS SOLEANOS vs NAZARENO DE UTRERA | 13/06 22:00 | Pista B
+A Jerusalem Contigo vs Vera Cruz FS | 12/06 21:00 | Pista C
+A Jerusalem Contigo vs Paz | 13/06 01:00 | Pista B
+Vera Cruz FS vs Paz | 13/06 05:00 | Pista C
+Coronacion Campillos vs Vera Cruz FS | 13/06 19:00 | Pista C
+A Jerusalem Contigo vs Coronacion Campillos | 13/06 21:00 | Pista A
+Paz vs Coronacion Campillos | 13/06 23:00 | Pista C
+Los Moraitos vs Los Quintos F.S | 12/06 22:00 | Pista C
+Tres Caidas vs La Butaca del Furrque | 12/06 22:00 | Pista B
+Los Moraitos vs Tres Caidas | 13/06 02:00 | Pista C
+Los Quintos F.S vs La Butaca del Furrque | 13/06 02:00 | Pista B
+Los Moraitos vs La Butaca del Furrque | 13/06 20:00 | Pista C
+Tres Caidas vs Los Quintos F.S | 13/06 20:00 | Pista B
+Los Acólitos de Paco vs La Agrupa F.S | 12/06 23:00 | Pista B
+Los Remedios vs Costangeles | 12/06 23:00 | Pista C
+Costangeles vs La Agrupa F.S | 13/06 03:00 | Pista B
+Los Acólitos de Paco vs Los Remedios | 13/06 03:00 | Pista C
+Los Acólitos de Paco vs Costangeles | 13/06 21:00 | Pista B
+La Agrupa F.S vs Los Remedios | 13/06 21:00 | Pista C
+Fernando Guerrero vs Los Soleanos | 13/06 00:00 | Pista C
+Nazareno de Utrera vs Borriquita de Trajano | 13/06 00:00 | Pista B
+Fernando Guerrero vs Nazareno de Utrera | 13/06 04:00 | Pista C
+Los Soleanos vs Borriquita de Trajano | 13/06 04:00 | Pista B
+Fernando Guerrero vs Borriquita de Trajano | 13/06 22:00 | Pista C
+Los Soleanos vs Nazareno de Utrera | 13/06 22:00 | Pista B
