@@ -130,6 +130,25 @@ function cardGlyph(tipo: string) {
   return null;
 }
 
+function estadoNorm(estado: string | null | undefined) {
+  return (estado ?? "pendiente").toLowerCase();
+}
+
+function partidoSortActivos(a: Partido, b: Partido) {
+  const rank = (e: string) => (e === "jugandose" ? 0 : e === "pendiente" ? 1 : 2);
+  const dr = rank(estadoNorm(a.estado)) - rank(estadoNorm(b.estado));
+  if (dr !== 0) return dr;
+  const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+  const tb = b.fecha_hora ? new Date(b.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+  return ta - tb;
+}
+
+function partidoSortFinalizados(a: Partido, b: Partido) {
+  const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : 0;
+  const tb = b.fecha_hora ? new Date(b.fecha_hora).getTime() : 0;
+  return tb - ta;
+}
+
 export default function AdminDirectoPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [rol, setRol] = useState<string | null>(null);
@@ -154,6 +173,7 @@ export default function AdminDirectoPage() {
   const [dcApellidos, setDcApellidos] = useState("");
   const [dcTelefono, setDcTelefono] = useState("");
   const [dcLoading, setDcLoading] = useState(false);
+  const [directoTab, setDirectoTab] = useState<"activos" | "finalizados">("activos");
 
   const expandedIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -367,6 +387,16 @@ export default function AdminDirectoPage() {
     });
   }, [goles, tarjetas, livePartido]);
 
+  const partidosActivos = useMemo(
+    () => partidos.filter((p) => estadoNorm(p.estado) !== "finalizado").sort(partidoSortActivos),
+    [partidos],
+  );
+  const partidosFinalizados = useMemo(
+    () => partidos.filter((p) => estadoNorm(p.estado) === "finalizado").sort(partidoSortFinalizados),
+    [partidos],
+  );
+  const partidosVisibles = directoTab === "activos" ? partidosActivos : partidosFinalizados;
+
   async function setEstado(id: string, estado: string) {
     setMsg("");
     const token = await getToken();
@@ -403,6 +433,11 @@ export default function AdminDirectoPage() {
         );
       }
     }
+    if (estado === "finalizado") {
+      if (expandedId === id) setExpandedId(null);
+      setDirectoTab("activos");
+    }
+    if (estado === "jugandose") setDirectoTab("activos");
     await load();
     return true;
   }
@@ -642,9 +677,56 @@ export default function AdminDirectoPage() {
           <h1 className="text-2xl font-bold text-violet-800">Directo</h1>
           <p className="mt-1 text-slate-700">
             Pulsa el <strong>+</strong> junto al marcador para sumar un gol (autor o propia puerta). Las tarjetas se guardan al instante al pulsar{" "}
-            <strong>TA / DA / TR / Agr</strong>. Abajo verás el hilo cronológico del partido.
+            <strong>TA / DA / TR / Agr</strong>. Los partidos finalizados pasan a la pestaña <strong>Finalizados</strong>, donde puedes corregir incidencias.
           </p>
         </div>
+
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+              directoTab === "activos" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            onClick={() => {
+              setDirectoTab("activos");
+              setExpandedId(null);
+            }}
+          >
+            En directo
+            {partidosActivos.length > 0 ? (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${directoTab === "activos" ? "bg-white/25" : "bg-violet-100 text-violet-800"}`}>
+                {partidosActivos.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+              directoTab === "finalizados" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            onClick={() => {
+              setDirectoTab("finalizados");
+              setExpandedId(null);
+            }}
+          >
+            Finalizados
+            {partidosFinalizados.length > 0 ? (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${directoTab === "finalizados" ? "bg-white/25" : "bg-slate-300 text-slate-800"}`}>
+                {partidosFinalizados.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
+        {directoTab === "activos" ? (
+          <p className="text-xs text-slate-600">
+            Primero los que se están jugando, después los pendientes. Al finalizar un partido desaparece de aquí.
+          </p>
+        ) : (
+          <p className="text-xs text-slate-600">
+            Partidos ya cerrados. Puedes abrirlos para revisar o corregir goles y tarjetas; los cambios actualizan clasificación y cuadro.
+          </p>
+        )}
 
         {rol === "admin" ? (
           <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
@@ -670,14 +752,32 @@ export default function AdminDirectoPage() {
         ) : null}
 
         <div className="grid gap-4">
-          {partidos.map((p) => {
+          {partidosVisibles.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-600">
+              {directoTab === "activos"
+                ? "No hay partidos pendientes ni en juego. Cuando finalices encuentros aparecerán en la pestaña Finalizados."
+                : "Aún no hay partidos finalizados."}
+            </p>
+          ) : null}
+          {partidosVisibles.map((p) => {
             const abierto = expandedId === p.id;
             const tieneEquipos = Boolean(p.equipo_local_id && p.equipo_visitante_id);
-            const enJuego = p.estado === "jugandose";
-            const permiteEdiciones = tieneEquipos && enJuego;
+            const enJuego = estadoNorm(p.estado) === "jugandose";
+            const finalizado = estadoNorm(p.estado) === "finalizado";
+            const permiteEdiciones =
+              tieneEquipos && (enJuego || (directoTab === "finalizados" && finalizado));
 
             return (
-              <div key={p.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <div
+                key={p.id}
+                className={`rounded-lg border p-3 shadow-sm ${
+                  finalizado && directoTab === "finalizados"
+                    ? "border-slate-300 bg-slate-50"
+                    : enJuego
+                      ? "border-emerald-300 bg-emerald-50/30"
+                      : "border-slate-200 bg-white"
+                }`}
+              >
                 <button
                   type="button"
                   className="w-full text-left"
@@ -689,22 +789,44 @@ export default function AdminDirectoPage() {
                     <span className="text-xl text-emerald-700">{p.goles_visitante ?? 0}</span> {n(p.equipo_visitante_id)}
                   </p>
                   <p className="text-sm text-slate-600">
-                    {p.fase ?? "—"} · {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Sin fecha"} · estado:{" "}
-                    {p.estado ?? "pendiente"}
+                    {p.fase ?? "—"} · {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Sin fecha"} ·{" "}
+                    <span
+                      className={
+                        enJuego ? "font-semibold text-emerald-700" : finalizado ? "font-semibold text-slate-700" : "text-slate-600"
+                      }
+                    >
+                      {p.estado ?? "pendiente"}
+                    </span>
                     {!abierto ? <span className="ml-2 text-violet-600">Mostrar incidentes ▾</span> : null}
                   </p>
                 </button>
 
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => void setEstado(p.id, "pendiente")}>
-                    Pendiente
-                  </button>
-                  <button className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700" onClick={() => void handleComenzar(p.id)}>
-                    Comenzar
-                  </button>
-                  <button className="rounded border border-violet-300 px-2 py-1 text-xs text-violet-700" onClick={() => void setEstado(p.id, "finalizado")}>
-                    Finalizar
-                  </button>
+                  {directoTab === "activos" ? (
+                    <>
+                      <button className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => void setEstado(p.id, "pendiente")}>
+                        Pendiente
+                      </button>
+                      <button className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700" onClick={() => void handleComenzar(p.id)}>
+                        Comenzar
+                      </button>
+                      <button className="rounded border border-violet-300 px-2 py-1 text-xs text-violet-700" onClick={() => void setEstado(p.id, "finalizado")}>
+                        Finalizar
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="rounded border border-emerald-400 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
+                        onClick={() => void setEstado(p.id, "jugandose")}
+                      >
+                        Reabrir (jugándose)
+                      </button>
+                      <button className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => void setEstado(p.id, "pendiente")}>
+                        Marcar pendiente
+                      </button>
+                    </>
+                  )}
                   {!abierto ? (
                     <button
                       type="button"
@@ -802,6 +924,10 @@ export default function AdminDirectoPage() {
                           {!permiteEdiciones ? (
                             <p className="mt-2 text-center text-xs text-amber-200">
                               Para registrar incidencias el partido debe estar en estado <strong>jugandose</strong>.
+                            </p>
+                          ) : finalizado ? (
+                            <p className="mt-2 text-center text-xs text-amber-100">
+                              Partido finalizado: puedes corregir goles y tarjetas. Los cambios se reflejan en clasificación y cuadro.
                             </p>
                           ) : null}
                         </div>
