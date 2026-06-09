@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { TORNEO_COMPETICIONES, TORNEO_COMPETICION_KO_GENERICA } from "@/lib/torneo-constants";
+import { tituloCompeticionMostrar } from "@/lib/torneo-constants";
 import {
+  findKnockoutPartidoCandidates,
   findTeamIdByName,
+  parseKnockoutScheduleText,
   parseScheduleText,
   resolvePistaNombre,
   toIsoFromParts,
@@ -53,7 +56,17 @@ type Body =
   | { action: "delete_pista"; id?: string }
   | { action: "set_estado"; id?: string; estado?: string }
   | {
+      action: "save_knockout_config";
+      mode?: "auto" | "manual";
+      manualPairs?: {
+        champions?: Array<{ local: string; visit: string } | string>;
+        europa?: Array<{ local: string; visit: string } | string>;
+        conference?: Array<{ local: string; visit: string } | string>;
+      };
+    }
+  | {
       action: "apply_schedule";
+      kind?: "groups" | "knockout";
       text?: string;
       year?: number;
       weekendViernes?: string;
@@ -398,19 +411,55 @@ export async function POST(request: NextRequest) {
 
   if (body.action === "save_match") {
     if (!body.id) return NextResponse.json({ error: "Falta id del partido." }, { status: 400 });
-    const patch = {
-      equipo_local_id: body.equipo_local_id ?? null,
-      equipo_visitante_id: body.equipo_visitante_id ?? null,
-      fecha_hora: body.fecha_hora || null,
-      pista: body.pista || null,
-      estado: body.estado || null,
-      fase: body.fase || null,
-      slot_local: body.slot_local || null,
-      slot_visitante: body.slot_visitante || null,
-    };
+    const patch: Record<string, unknown> = {};
+    const b = body as MatchPayload & { id: string };
+    if (b.equipo_local_id !== undefined) patch.equipo_local_id = b.equipo_local_id;
+    if (b.equipo_visitante_id !== undefined) patch.equipo_visitante_id = b.equipo_visitante_id;
+    if (b.fecha_hora !== undefined) patch.fecha_hora = b.fecha_hora || null;
+    if (b.pista !== undefined) patch.pista = b.pista || null;
+    if (b.estado !== undefined) patch.estado = b.estado || null;
+    if (b.fase !== undefined) patch.fase = b.fase || null;
+    if (b.slot_local !== undefined) patch.slot_local = b.slot_local || null;
+    if (b.slot_visitante !== undefined) patch.slot_visitante = b.slot_visitante || null;
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({ error: "Nada que actualizar." }, { status: 400 });
+    }
     const up = await admin.from("partidos").update(patch).eq("id", body.id);
     if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "save_knockout_config") {
+    const mode = body.mode === "auto" ? "auto" : "manual";
+    const normalizePair = (raw: { local: string; visit: string } | string) => {
+      if (typeof raw === "string") {
+        const normalized = raw.replace(/\s+/g, "");
+        const sep = normalized.toLowerCase().includes("vs") ? "vs" : "-";
+        const [local, visit] = normalized.split(/vs/i);
+        return { local: (local ?? "").trim().toUpperCase(), visit: (visit ?? "").trim().toUpperCase() };
+      }
+      return {
+        local: (raw.local ?? "").trim().toUpperCase(),
+        visit: (raw.visit ?? "").trim().toUpperCase(),
+      };
+    };
+    const pairs = {
+      champions: (body.manualPairs?.champions ?? []).map(normalizePair).filter((p) => p.local && p.visit),
+      europa: (body.manualPairs?.europa ?? []).map(normalizePair).filter((p) => p.local && p.visit),
+      conference: (body.manualPairs?.conference ?? []).map(normalizePair).filter((p) => p.local && p.visit),
+    };
+    const payload = { mode, pairs };
+    const { data: existing, error: readErr } = await admin
+      .from("configuracion_torneo")
+      .select("id")
+      .limit(1)
+      .maybeSingle();
+    if (readErr) return NextResponse.json({ error: readErr.message }, { status: 400 });
+    const up = existing?.id
+      ? await admin.from("configuracion_torneo").update({ knockout_manual_config: payload }).eq("id", existing.id)
+      : await admin.from("configuracion_torneo").insert({ knockout_manual_config: payload });
+    if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
+    return NextResponse.json({ ok: true, knockoutManualConfig: payload });
   }
 
   if (body.action === "create_match") {
@@ -461,6 +510,7 @@ export async function POST(request: NextRequest) {
   if (body.action === "apply_schedule") {
     const text = (body.text ?? "").trim();
     if (!text) return NextResponse.json({ error: "Pega el horario en el cuadro de texto." }, { status: 400 });
+    const kind = body.kind === "knockout" ? "knockout" : "groups";
     const year = Number(body.year) || new Date().getFullYear();
     const weekend = weekendFromStrings({
       viernes: body.weekendViernes,
@@ -473,7 +523,9 @@ export async function POST(request: NextRequest) {
         admin.from("equipos").select("id,nombre"),
         admin
           .from("partidos")
-          .select("id,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante,fase"),
+          .select(
+            "id,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante,fase,competicion,ronda",
+          ),
         admin.from("pistas").select("id,nombre").order("nombre"),
       ]);
     if (eErr) return NextResponse.json({ error: eErr.message }, { status: 400 });
@@ -482,7 +534,16 @@ export async function POST(request: NextRequest) {
 
     const teamList = (equipos ?? []) as { id: string; nombre: string }[];
     const pistaList = (pistas ?? []) as { id: string; nombre: string }[];
-    const parsed = parseScheduleText(text, year, weekend);
+    const partidoList = (partidos ?? []) as {
+      id: string;
+      equipo_local_id: string | null;
+      equipo_visitante_id: string | null;
+      slot_local?: string | null;
+      slot_visitante?: string | null;
+      fase?: string | null;
+      competicion?: string | null;
+      ronda?: string | null;
+    }[];
 
     let updated = 0;
     let pistasAsignadas = 0;
@@ -490,7 +551,73 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
     const pistaWarnings: string[] = [];
 
-    for (const row of parsed) {
+    if (kind === "knockout") {
+      const parsed = parseKnockoutScheduleText(text, year, weekend);
+      const knockoutPartidos = partidoList.filter((p) => (p.fase ?? "").startsWith("Cuadro -"));
+
+      for (const row of parsed) {
+        if (!row.ok) {
+          if (row.raw) errors.push(`${row.raw}: ${row.reason}`);
+          continue;
+        }
+
+        const candidates = findKnockoutPartidoCandidates(
+          knockoutPartidos,
+          row.line,
+          tituloCompeticionMostrar,
+        );
+
+        if (candidates.length !== 1) {
+          const label = `${row.line.slotLocal} vs ${row.line.slotVisit}`;
+          const compHint = row.line.competicion ? ` (${row.line.competicion})` : "";
+          skipped.push(
+            `${label}${compHint}: ${candidates.length === 0 ? "cruce no encontrado (genera brackets antes)" : "varios cruces coinciden (añade Champions/Europa/Conference o ronda)"}`,
+          );
+          continue;
+        }
+
+        const fechaIso = toIsoFromParts(
+          row.line.day,
+          row.line.month,
+          row.line.hour,
+          row.line.minute,
+          year,
+        );
+        const patch: Record<string, unknown> = { fecha_hora: fechaIso };
+        const resolved = resolvePistaNombre(row.line.pista, pistaList);
+        if (resolved.nombre) {
+          patch.pista = resolved.nombre;
+          pistasAsignadas += 1;
+        }
+        if (resolved.warning) {
+          pistaWarnings.push(`${row.line.slotLocal} vs ${row.line.slotVisit}: ${resolved.warning}`);
+        }
+
+        const up = await admin.from("partidos").update(patch).eq("id", candidates[0].id);
+        if (up.error) {
+          errors.push(`${row.raw}: ${up.error.message}`);
+          continue;
+        }
+        updated += 1;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        kind,
+        updated,
+        pistasAsignadas,
+        pistaWarnings,
+        pistasEnApp: pistaList.map((p) => p.nombre),
+        skipped,
+        errors,
+        parsedOk: parsed.filter((r) => r.ok).length,
+        parsedTotal: parsed.length,
+        partidosCruces: knockoutPartidos.length,
+        equiposEnApp: teamList.map((t) => t.nombre).sort((a, b) => a.localeCompare(b, "es")),
+      });
+    }
+
+    const parsed = parseScheduleText(text, year, weekend);
       if (!row.ok) {
         if (row.raw) errors.push(`${row.raw}: ${row.reason}`);
         continue;
@@ -505,13 +632,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      const candidates = ((partidos ?? []) as {
-        id: string;
-        equipo_local_id: string | null;
-        equipo_visitante_id: string | null;
-        slot_local?: string | null;
-        slot_visitante?: string | null;
-      }[]).filter((p) => {
+      const candidates = partidoList.filter((p) => {
         const direct =
           p.equipo_local_id === localId && p.equipo_visitante_id === visitId;
         const reverse =
@@ -551,15 +672,13 @@ export async function POST(request: NextRequest) {
       updated += 1;
     }
 
-    const partidosGrupo = ((partidos ?? []) as { id: string }[]).filter((p) =>
-      Boolean(
-        (p as { equipo_local_id?: string | null }).equipo_local_id &&
-          (p as { equipo_visitante_id?: string | null }).equipo_visitante_id,
-      ),
+    const partidosGrupo = partidoList.filter(
+      (p) => p.equipo_local_id && p.equipo_visitante_id,
     ).length;
 
     return NextResponse.json({
       ok: true,
+      kind,
       updated,
       pistasAsignadas,
       pistaWarnings,

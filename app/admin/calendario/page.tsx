@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { KnockoutBracketView } from "@/lib/knockout-bracket-view";
 import { toIsoFromParts } from "@/lib/server/parse-schedule-lines";
 import { TORNEO_COMPETICIONES, tituloCompeticionMostrar } from "@/lib/torneo-constants";
 
@@ -19,6 +20,14 @@ type Config = {
   conference_best_thirds?: number | null;
   conference_best_fourths?: number | null;
   conference_best_fifths?: number | null;
+  knockout_manual_config?: {
+    mode?: "auto" | "manual";
+    pairs?: {
+      champions?: { local: string; visit: string }[];
+      europa?: { local: string; visit: string }[];
+      conference?: { local: string; visit: string }[];
+    };
+  } | null;
 };
 type Partido = {
   id: string;
@@ -82,8 +91,71 @@ function tournamentYearFromIso(iso: string | null, fallback = 2026): number {
   return datePartsMadrid(iso).year || fallback;
 }
 
+function defaultManualPairs() {
+  return {
+    champions: [
+      { local: "1A", visit: "2D" },
+      { local: "1B", visit: "2C" },
+      { local: "1C", visit: "2B" },
+      { local: "1D", visit: "2A" },
+    ],
+    europa: [
+      { local: "2A", visit: "3D" },
+      { local: "2B", visit: "3C" },
+      { local: "2C", visit: "3B" },
+      { local: "2D", visit: "3A" },
+    ],
+    conference: [
+      { local: "3A", visit: "4D" },
+      { local: "3B", visit: "4C" },
+      { local: "3C", visit: "4B" },
+      { local: "3D", visit: "4A" },
+    ],
+  };
+}
+
+function applyKnockoutConfigToState(
+  raw: Config["knockout_manual_config"],
+  setMode: (m: "auto" | "manual") => void,
+  setPairs: (p: ReturnType<typeof defaultManualPairs>) => void,
+) {
+  if (!raw || typeof raw !== "object") return;
+  if (raw.mode === "auto" || raw.mode === "manual") setMode(raw.mode);
+  const pairs = raw.pairs;
+  if (!pairs || typeof pairs !== "object") return;
+  const fb = defaultManualPairs();
+  setPairs({
+    champions: pairs.champions?.length ? pairs.champions : fb.champions,
+    europa: pairs.europa?.length ? pairs.europa : fb.europa,
+    conference: pairs.conference?.length ? pairs.conference : fb.conference,
+  });
+}
+
 type MatchSortMode = "hora-asc" | "hora-desc" | "grupo";
-type KnockoutSortMode = MatchSortMode | "competicion";
+type KnockoutSortMode = MatchSortMode | "cuadro" | "competicion";
+
+function competicionRank(stored: string | null | undefined): number {
+  const t = tituloCompeticionMostrar(stored).toLowerCase();
+  if (t.includes("champion")) return 1;
+  if (t.includes("europa")) return 2;
+  if (t.includes("conference")) return 3;
+  return 9;
+}
+
+function roundRank(name: string) {
+  const k = name.toLowerCase();
+  if (k.includes("ronda 1")) return 1;
+  if (k.includes("dieciseis")) return 2;
+  if (k.includes("octavos")) return 3;
+  if (k.includes("cuartos")) return 4;
+  if (k.includes("semifinal")) return 5;
+  if (k.includes("final")) return 6;
+  return 99;
+}
+
+function knockoutCuadroSortKey(m: Partido): [number, number, number] {
+  return [competicionRank(m.competicion), roundRank(m.ronda ?? ""), Number(m.orden ?? 0)];
+}
 
 function slotGrupoLetter(slot: string | null | undefined): string {
   const m = (slot ?? "").trim().match(/([A-Za-z])$/);
@@ -134,16 +206,12 @@ function sortKnockoutPartidos(
 ): Partido[] {
   const sorted = [...list];
   sorted.sort((a, b) => {
-    if (mode === "competicion") {
-      const ccmp = tituloCompeticionMostrar(a.competicion).localeCompare(
-        tituloCompeticionMostrar(b.competicion),
-        "es",
-      );
-      if (ccmp !== 0) return ccmp;
-      const rcmp = roundRank(a.ronda ?? "") - roundRank(b.ronda ?? "");
-      if (rcmp !== 0) return rcmp;
-      const ocmp = Number(a.orden ?? 0) - Number(b.orden ?? 0);
-      if (ocmp !== 0) return ocmp;
+    if (mode === "cuadro" || mode === "competicion") {
+      const [ca, ra, oa] = knockoutCuadroSortKey(a);
+      const [cb, rb, ob] = knockoutCuadroSortKey(b);
+      if (ca !== cb) return ca - cb;
+      if (ra !== rb) return ra - rb;
+      if (oa !== ob) return oa - ob;
     }
     if (mode === "grupo") {
       const gcmp = partidoGrupoSortKey(a, equipos).localeCompare(partidoGrupoSortKey(b, equipos), "es");
@@ -169,6 +237,8 @@ export default function AdminCalendarioPage() {
   const [tab, setTab] = useState<"calendario" | "cruces" | "horarios">("calendario");
   const [msg, setMsg] = useState("");
   const [scheduleText, setScheduleText] = useState("");
+  const [knockoutScheduleText, setKnockoutScheduleText] = useState("");
+  const [scheduleKind, setScheduleKind] = useState<"groups" | "knockout">("groups");
   const [scheduleYear, setScheduleYear] = useState("2026");
   const [weekendViernes, setWeekendViernes] = useState("12/06");
   const [weekendSabado, setWeekendSabado] = useState("13/06");
@@ -181,32 +251,14 @@ export default function AdminCalendarioPage() {
   const [filterKnockoutCompeticion, setFilterKnockoutCompeticion] = useState("");
   const [filterKnockoutGrupo, setFilterKnockoutGrupo] = useState("");
   const [filterKnockoutPista, setFilterKnockoutPista] = useState("");
-  const [sortKnockoutMode, setSortKnockoutMode] = useState<KnockoutSortMode>("hora-asc");
+  const [sortKnockoutMode, setSortKnockoutMode] = useState<KnockoutSortMode>("cuadro");
   const [startDm, setStartDm] = useState("");
   const [startHm, setStartHm] = useState("18:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
   const [defaultPista, setDefaultPista] = useState("Pista 1");
-  const [knockoutMode, setKnockoutMode] = useState<"auto" | "manual">("auto");
-  const [manualPairs, setManualPairs] = useState({
-    champions: [
-      { local: "1A", visit: "2D" },
-      { local: "1B", visit: "2C" },
-      { local: "1C", visit: "2B" },
-      { local: "1D", visit: "2A" },
-    ],
-    europa: [
-      { local: "2A", visit: "3D" },
-      { local: "2B", visit: "3C" },
-      { local: "2C", visit: "3B" },
-      { local: "2D", visit: "3A" },
-    ],
-    conference: [
-      { local: "3A", visit: "4D" },
-      { local: "3B", visit: "4C" },
-      { local: "3C", visit: "4B" },
-      { local: "3D", visit: "4A" },
-    ],
-  });
+  const [knockoutMode, setKnockoutMode] = useState<"auto" | "manual">("manual");
+  const [crucesViewMode, setCrucesViewMode] = useState<"lista" | "cuadro">("cuadro");
+  const [manualPairs, setManualPairs] = useState(defaultManualPairs);
   const [newMatch, setNewMatch] = useState({
     local: "",
     visit: "",
@@ -251,7 +303,24 @@ export default function AdminCalendarioPage() {
     setEquipos(json.equipos ?? []);
     setPistas(json.pistas ?? []);
     setPartidos(json.partidos ?? []);
-    setCfg(json.config ?? null);
+    const nextCfg = json.config ?? null;
+    setCfg(nextCfg);
+    applyKnockoutConfigToState(nextCfg?.knockout_manual_config, setKnockoutMode, setManualPairs);
+  }
+
+  async function onSaveKnockoutConfig() {
+    try {
+      setMsg("Guardando configuracion de cruces...");
+      await api({
+        action: "save_knockout_config",
+        mode: knockoutMode,
+        manualPairs: manualPairs,
+      });
+      setMsg("Configuracion de cruces guardada. Ya no se resetea al editar horarios.");
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Error guardando configuracion.");
+    }
   }
 
   useEffect(() => {
@@ -293,6 +362,11 @@ export default function AdminCalendarioPage() {
   async function onGenerateKnockout() {
     try {
       setMsg("Generando cruces...");
+      await api({
+        action: "save_knockout_config",
+        mode: knockoutMode,
+        manualPairs: manualPairs,
+      });
       const r = await api({
         action: "generate_knockout",
         resetExisting: true,
@@ -321,32 +395,63 @@ export default function AdminCalendarioPage() {
       if (!res.ok) throw new Error("No se encontro la plantilla.");
       const text = await res.text();
       setScheduleText(text.trim());
-      setScheduleResult("Plantilla 12-14 junio cargada. Pulsa Aplicar horarios.");
+      setScheduleKind("groups");
+      setScheduleResult("Plantilla grupos 12-14 junio cargada. Pulsa Aplicar horarios.");
     } catch (e) {
       setScheduleResult(e instanceof Error ? e.message : "Error cargando plantilla.");
     }
   }
 
+  async function onLoadKnockoutTemplate() {
+    try {
+      const res = await fetch("/cruces-2026-import.txt");
+      if (!res.ok) throw new Error("No se encontro la plantilla de cruces.");
+      const text = await res.text();
+      setKnockoutScheduleText(text.trim());
+      setScheduleKind("knockout");
+      setScheduleResult("Plantilla cruces domingo cargada. Pulsa Aplicar horarios.");
+    } catch (e) {
+      setScheduleResult(e instanceof Error ? e.message : "Error cargando plantilla de cruces.");
+    }
+  }
+
   async function onApplySchedule() {
-    if (!scheduleText.trim()) {
-      setScheduleResult("Pega las lineas del horario o pulsa Cargar plantilla.");
+    const text = scheduleKind === "knockout" ? knockoutScheduleText : scheduleText;
+    if (!text.trim()) {
+      setScheduleResult(
+        scheduleKind === "knockout"
+          ? "Pega las lineas de cruces o pulsa Cargar plantilla cruces."
+          : "Pega las lineas del horario o pulsa Cargar plantilla grupos.",
+      );
       setMsg("Pega las lineas del horario.");
       return;
     }
-    const gruposCount = partidos.filter((p) => (p.fase ?? "").startsWith("Grupo ")).length;
-    if (gruposCount === 0) {
-      setScheduleResult(
-        "No hay partidos de grupos. Primero ve a Generar calendario y crea los partidos.",
-      );
-      setMsg("Genera antes el calendario de grupos.");
-      return;
+    if (scheduleKind === "groups") {
+      const gruposCount = partidos.filter((p) => (p.fase ?? "").startsWith("Grupo ")).length;
+      if (gruposCount === 0) {
+        setScheduleResult(
+          "No hay partidos de grupos. Primero ve a Generar calendario y crea los partidos.",
+        );
+        setMsg("Genera antes el calendario de grupos.");
+        return;
+      }
+    } else {
+      const crucesCount = partidos.filter((p) => (p.fase ?? "").startsWith("Cuadro -")).length;
+      if (crucesCount === 0) {
+        setScheduleResult(
+          "No hay cruces. Primero ve a Generar cruces y crea los brackets.",
+        );
+        setMsg("Genera antes los cruces.");
+        return;
+      }
     }
     setApplyingSchedule(true);
     setScheduleResult("Aplicando horarios...");
     try {
       const r = (await api({
         action: "apply_schedule",
-        text: scheduleText,
+        kind: scheduleKind,
+        text,
         year: Number(scheduleYear) || 2026,
         weekendViernes,
         weekendSabado,
@@ -360,6 +465,7 @@ export default function AdminCalendarioPage() {
         errors?: string[];
         parsedOk?: number;
         partidosGrupo?: number;
+        partidosCruces?: number;
         equiposEnApp?: string[];
       };
       const parts: string[] = [];
@@ -372,9 +478,11 @@ export default function AdminCalendarioPage() {
       }
       if ((r.updated ?? 0) === 0) {
         parts.push(
-          "Ningun partido se actualizo. Revisa que los nombres coincidan con los equipos en la app.",
+          scheduleKind === "knockout"
+            ? "Ningun cruce se actualizo. Revisa slots (1A vs 2D) y competicion (Champions/Europa/Conference)."
+            : "Ningun partido se actualizo. Revisa que los nombres coincidan con los equipos en la app.",
         );
-        if (r.equiposEnApp?.length) {
+        if (r.equiposEnApp?.length && scheduleKind === "groups") {
           parts.push(`Equipos en la app: ${r.equiposEnApp.join(" · ")}`);
         }
       }
@@ -571,6 +679,13 @@ export default function AdminCalendarioPage() {
     filterKnockoutPista,
     sortKnockoutMode,
   ]);
+
+  const teamNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const e of equipos) map[e.id] = e.nombre;
+    return map;
+  }, [equipos]);
+
   function parsePos(text: string | null | undefined) {
     return (text ?? "")
       .split(",")
@@ -610,26 +725,6 @@ export default function AdminCalendarioPage() {
     takeBest("conference", 5, cfg?.conference_best_fifths);
     return out[comp];
   }
-
-  useEffect(() => {
-    const comps: Array<"champions" | "europa" | "conference"> = ["champions", "europa", "conference"];
-    setManualPairs((prev) => {
-      const next = { ...prev };
-      for (const c of comps) {
-        const slots = slotsForComp(c);
-        const bracket = Math.max(2, (() => { let p = 1; while (p < slots.length) p *= 2; return p; })());
-        const rows = bracket / 2;
-        const seeded = [...slots];
-        while (seeded.length < bracket) seeded.push("BYE");
-        const generated = Array.from({ length: rows }, (_, i) => ({
-          local: seeded[i] ?? "",
-          visit: seeded[bracket - 1 - i] ?? "",
-        }));
-        next[c] = generated;
-      }
-      return next;
-    });
-  }, [cfg, groupLetters.join(",")]);
 
   function compRows(comp: "champions" | "europa" | "conference") {
     return manualPairs[comp];
@@ -856,23 +951,70 @@ export default function AdminCalendarioPage() {
               </div>
             </div>
           ) : null}
+          {knockoutMode === "manual" ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white"
+                type="button"
+                onClick={() => void onSaveKnockoutConfig()}
+              >
+                Guardar configuracion de cruces
+              </button>
+              <p className="self-center text-xs text-slate-600">
+                Guarda los emparejamientos de arriba antes de editar horarios (asi no se resetean).
+              </p>
+            </div>
+          ) : null}
         </div>
         ) : null}
 
         {tab === "horarios" ? (
           <div className="rounded-xl border border-slate-200 p-4">
-            <p className="mb-2 font-semibold">Importar fecha y hora de partidos</p>
-            <p className="mb-3 text-sm text-slate-600">
-              Pega una linea por partido (como en el PDF). Los nombres deben coincidir con los equipos en la app.
-              El orden cronologico lo marca la hora; no hace falta poner jornada.
+            <div className="mb-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={`rounded-lg px-3 py-2 text-sm font-semibold ${scheduleKind === "groups" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`}
+                onClick={() => setScheduleKind("groups")}
+              >
+                Grupos
+              </button>
+              <button
+                type="button"
+                className={`rounded-lg px-3 py-2 text-sm font-semibold ${scheduleKind === "knockout" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`}
+                onClick={() => setScheduleKind("knockout")}
+              >
+                Cruces
+              </button>
+            </div>
+            <p className="mb-2 font-semibold">
+              {scheduleKind === "groups" ? "Importar horarios de grupos" : "Importar horarios de cruces"}
             </p>
+            {scheduleKind === "groups" ? (
+              <>
+                <p className="mb-3 text-sm text-slate-600">
+                  Pega una linea por partido (como en el PDF). Los nombres deben coincidir con los equipos en la app.
+                </p>
+                <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
+                  Equipo Local vs Equipo Visitante | VIERNES 21:00 | C
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-slate-600">
+                  Pega una linea por cruce. Usa los slots del cuadro (1A vs 2D, GCuartos 1 vs GCuartos 2…).
+                  Indica la competicion si hay varios cuadros con el mismo cruce.
+                </p>
+                <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
+                  Champions | 1A vs 2D | DOMINGO 21:00 | C
+                </p>
+                <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
+                  Europa | GCuartos 1 vs GCuartos 2 | DOMINGO 23:00 | B
+                </p>
+              </>
+            )}
             <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
-              Torneo nocturno: <strong>SABADO 1:00</strong> es la madrugada del viernes al sabado (01:00), no las 13:00.
-              La pista va con letra: A, B o C. Deben existir en admin como{" "}
-              <strong>Pista A</strong>, <strong>Pista B</strong> y <strong>Pista C</strong> (o solo A, B, C).
-            </p>
-            <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
-              Equipo Local vs Equipo Visitante | VIERNES 21:00 | C
+              Torneo nocturno: <strong>DOMINGO 1:00</strong> es la madrugada del sabado al domingo (01:00), no las 13:00.
+              Pista con letra A, B o C (deben existir como Pista A/B/C en admin).
             </p>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <input
@@ -914,9 +1056,9 @@ export default function AdminCalendarioPage() {
               <button
                 className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-800"
                 type="button"
-                onClick={() => void onLoadScheduleTemplate()}
+                onClick={() => void (scheduleKind === "knockout" ? onLoadKnockoutTemplate() : onLoadScheduleTemplate())}
               >
-                Cargar plantilla 12-14 jun
+                {scheduleKind === "knockout" ? "Cargar plantilla cruces" : "Cargar plantilla grupos"}
               </button>
               <button
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
@@ -933,13 +1075,23 @@ export default function AdminCalendarioPage() {
               </pre>
             ) : null}
             <p className="mb-2 text-xs text-slate-600">
-              Partidos de grupos en la app: {groupMatches.length}. Si es 0, genera el calendario antes.
+              {scheduleKind === "groups"
+                ? `Partidos de grupos en la app: ${groupMatches.length}. Si es 0, genera el calendario antes.`
+                : `Cruces en la app: ${knockoutMatches.length}. Si es 0, genera los brackets antes.`}
             </p>
             <textarea
               className="min-h-[180px] w-full rounded-lg border border-slate-300 p-3 font-mono text-sm"
-              value={scheduleText}
-              onChange={(e) => setScheduleText(e.target.value)}
-              placeholder={"Los Cofrades vs La Peña | 06/06 10:00 | Pista 1\nOtro Equipo vs Otro Mas | 06/06 11:00 | Pista 2"}
+              value={scheduleKind === "knockout" ? knockoutScheduleText : scheduleText}
+              onChange={(e) =>
+                scheduleKind === "knockout"
+                  ? setKnockoutScheduleText(e.target.value)
+                  : setScheduleText(e.target.value)
+              }
+              placeholder={
+                scheduleKind === "knockout"
+                  ? "Champions | 1A vs 2D | DOMINGO 21:00 | C\nEuropa | 2A vs 3D | DOMINGO 22:00 | B"
+                  : "Los Cofrades vs La Peña | VIERNES 21:00 | C\nOtro Equipo vs Otro Mas | SABADO 1:00 | B"
+              }
             />
           </div>
         ) : null}
@@ -1137,10 +1289,10 @@ export default function AdminCalendarioPage() {
                     value={sortKnockoutMode}
                     onChange={(e) => setSortKnockoutMode(e.target.value as KnockoutSortMode)}
                   >
+                    <option value="cuadro">Orden del cuadro (como arriba)</option>
                     <option value="hora-asc">Hora (mas pronto primero)</option>
                     <option value="hora-desc">Hora (mas tarde primero)</option>
                     <option value="grupo">Grupo (A→Z) y luego hora</option>
-                    <option value="competicion">Competicion, ronda y hora</option>
                   </select>
                 </label>
                 <div className="flex items-end">
@@ -1151,7 +1303,7 @@ export default function AdminCalendarioPage() {
                       setFilterKnockoutCompeticion("");
                       setFilterKnockoutGrupo("");
                       setFilterKnockoutPista("");
-                      setSortKnockoutMode("hora-asc");
+                      setSortKnockoutMode("cuadro");
                     }}
                   >
                     Quitar filtros
@@ -1165,85 +1317,52 @@ export default function AdminCalendarioPage() {
                 </p>
               ) : (
                 <>
-                  <div className="mb-4 rounded-lg border border-violet-100 bg-violet-50/50 p-3">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">
-                      Listado por hora
-                    </p>
-                    <div className="grid gap-2">
-                      {filteredKnockoutMatches.map((p) => (
-                        <EditableMatchRow
-                          key={`list-${p.id}`}
-                          match={p}
-                          sideLabel={sideLabel}
-                          compactDate={compactDate}
-                          pistas={pistas}
-                          grupoLabel={partidoGruposTouch(p, equipos)[0]}
-                          onSave={async (patch) => {
-                            await api({ action: "save_match", id: p.id, ...patch });
-                            await load();
-                          }}
-                        />
-                      ))}
-                    </div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${crucesViewMode === "cuadro" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`}
+                      onClick={() => setCrucesViewMode("cuadro")}
+                    >
+                      Vista cuadro
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-lg px-3 py-2 text-sm font-semibold ${crucesViewMode === "lista" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`}
+                      onClick={() => setCrucesViewMode("lista")}
+                    >
+                      Vista lista (editar horarios)
+                    </button>
                   </div>
 
-                  <p className="mb-2 text-sm font-semibold text-slate-800">Brackets (cuadro)</p>
-                  <div className="grid gap-4">
-                    {Array.from(
-                      filteredKnockoutMatches.reduce((acc, m) => {
-                        const c = m.competicion ?? "General";
-                        if (!acc.has(c)) acc.set(c, []);
-                        acc.get(c)?.push(m);
-                        return acc;
-                      }, new Map<string, Partido[]>()),
-                    ).map(([comp, matches]) => (
-                      <div key={comp} className="rounded-lg border border-slate-200 p-3">
-                        <p className="mb-2 text-sm font-semibold text-violet-800">
-                          {tituloCompeticionMostrar(comp)}
-                        </p>
-                        <div className="overflow-x-auto">
-                          <div className="flex min-w-max gap-6">
-                            {Array.from(
-                              matches.reduce((acc, m) => {
-                                const r = m.ronda ?? "Ronda";
-                                if (!acc.has(r)) acc.set(r, []);
-                                acc.get(r)?.push(m);
-                                return acc;
-                              }, new Map<string, Partido[]>()),
-                            )
-                              .sort(([a], [b]) => roundRank(a) - roundRank(b))
-                              .map(([round, roundMatches], roundIdx) => (
-                                <div key={`${comp}-${round}`} className="w-[320px]">
-                                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                    {round}
-                                  </p>
-                                  <div className="grid gap-3">
-                                    {sortKnockoutPartidos(roundMatches, sortKnockoutMode, equipos).map((p, i) => (
-                                      <div
-                                        key={p.id}
-                                        style={{ marginTop: roundIdx === 0 ? 0 : `${i * 28}px` }}
-                                      >
-                                        <EditableMatchRow
-                                          match={p}
-                                          sideLabel={sideLabel}
-                                          compactDate={compactDate}
-                                          pistas={pistas}
-                                          grupoLabel={partidoGruposTouch(p, equipos)[0]}
-                                          onSave={async (patch) => {
-                                            await api({ action: "save_match", id: p.id, ...patch });
-                                            await load();
-                                          }}
-                                        />
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
+                  {crucesViewMode === "cuadro" ? (
+                    <div className="mb-4">
+                      <KnockoutBracketView matches={filteredKnockoutMatches} teamNames={teamNames} />
+                    </div>
+                  ) : (
+                    <div className="mb-4 rounded-lg border border-violet-100 bg-violet-50/50 p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">
+                        {sortKnockoutMode === "cuadro" || sortKnockoutMode === "competicion"
+                          ? "Listado en orden del cuadro"
+                          : "Listado por hora"}
+                      </p>
+                      <div className="grid gap-2">
+                        {filteredKnockoutMatches.map((p) => (
+                          <EditableMatchRow
+                            key={`list-${p.id}-${p.slot_local}-${p.slot_visitante}-${p.fecha_hora ?? ""}`}
+                            match={p}
+                            sideLabel={sideLabel}
+                            compactDate={compactDate}
+                            pistas={pistas}
+                            grupoLabel={partidoGruposTouch(p, equipos)[0]}
+                            onSave={async (patch) => {
+                              await api({ action: "save_match", id: p.id, ...patch });
+                              await load();
+                            }}
+                          />
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1254,17 +1373,6 @@ export default function AdminCalendarioPage() {
       </div>
     </main>
   );
-}
-
-function roundRank(name: string) {
-  const k = name.toLowerCase();
-  if (k.includes("ronda 1")) return 1;
-  if (k.includes("dieciseis")) return 2;
-  if (k.includes("octavos")) return 3;
-  if (k.includes("cuartos")) return 4;
-  if (k.includes("semifinal")) return 5;
-  if (k.includes("final")) return 6;
-  return 99;
 }
 
 function EditableMatchRow({

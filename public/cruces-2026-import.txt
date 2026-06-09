@@ -1,0 +1,42 @@
+# Cruces domingo 14/06/2026 — ajusta horas segun tu PDF
+# Antes: Generar cruces en admin (pestaña Cruces)
+# Champions / Europa / Conference = nombres del cuadro en la app
+
+# --- CHAMPIONS COFRADE — CUARTOS ---
+Champions | 1A vs 2D | DOMINGO 21:00 | C
+Champions | 1B vs 2C | DOMINGO 21:00 | B
+Champions | 1C vs 2B | DOMINGO 22:00 | A
+Champions | 1D vs 2A | DOMINGO 22:00 | C
+
+# --- CHAMPIONS — SEMIFINALES ---
+Champions | GCuartos 1 vs GCuartos 2 | DOMINGO 23:00 | B
+Champions | GCuartos 3 vs GCuartos 4 | DOMINGO 23:00 | A
+
+# --- CHAMPIONS — FINAL ---
+Champions | GSemifinal 1 vs GSemifinal 2 | DOMINGO 0:00 | C
+
+# --- EUROPA COFRADE — CUARTOS ---
+Europa | 2A vs 3D | DOMINGO 21:00 | B
+Europa | 2B vs 3C | DOMINGO 21:00 | C
+Europa | 2C vs 3B | DOMINGO 22:00 | B
+Europa | 2D vs 3A | DOMINGO 22:00 | A
+
+# --- EUROPA — SEMIFINALES ---
+Europa | GCuartos 1 vs GCuartos 2 | DOMINGO 1:00 | C
+Europa | GCuartos 3 vs GCuartos 4 | DOMINGO 1:00 | B
+
+# --- EUROPA — FINAL ---
+Europa | GSemifinal 1 vs GSemifinal 2 | DOMINGO 2:00 | A
+
+# --- CONFERENCE COFRADE — CUARTOS ---
+Conference | 3A vs 4D | DOMINGO 22:00 | C
+Conference | 3B vs 4C | DOMINGO 22:00 | B
+Conference | 3C vs 4B | DOMINGO 23:00 | A
+Conference | 3D vs 4A | DOMINGO 23:00 | C
+
+# --- CONFERENCE — SEMIFINALES ---
+Conference | GCuartos 1 vs GCuartos 2 | DOMINGO 2:00 | B
+Conference | GCuartos 3 vs GCuartos 4 | DOMINGO 2:00 | C
+
+# --- CONFERENCE — FINAL ---
+Conference | GSemifinal 1 vs GSemifinal 2 | DOMINGO 3:00 | A

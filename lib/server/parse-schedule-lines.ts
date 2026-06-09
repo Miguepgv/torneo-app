@@ -1,3 +1,5 @@
+import { TORNEO_COMPETICIONES } from "@/lib/torneo-constants";
+
 export type ScheduleLineInput = {
   localName: string;
   visitName: string;
@@ -377,3 +379,217 @@ export function toIsoFromParts(
 }
 
 export { normalizeTeamName };
+
+export type KnockoutScheduleLineInput = {
+  slotLocal: string;
+  slotVisit: string;
+  competicion?: string | null;
+  ronda?: string | null;
+  day: number;
+  month: number;
+  hour: number;
+  minute: number;
+  pista?: string | null;
+};
+
+export type ParsedKnockoutScheduleLine =
+  | { ok: true; line: KnockoutScheduleLineInput; raw: string }
+  | { ok: false; raw: string; reason: string };
+
+export function parseCompeticionLabel(raw: string): string | null {
+  const n = raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (n.includes("champion")) return TORNEO_COMPETICIONES.CHAMPIONS;
+  if (n.includes("europa")) return TORNEO_COMPETICIONES.EUROPA;
+  if (n.includes("conference") || n.includes("conferencia")) return TORNEO_COMPETICIONES.CONFERENCE;
+  return null;
+}
+
+export function parseRondaLabel(raw: string): string | null {
+  const n = raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (n.includes("octav")) return "Octavos";
+  if (n.includes("cuart")) return "Cuartos";
+  if (n.includes("semi")) return "Semifinal";
+  if (n.includes("final") && !n.includes("semi")) return "Final";
+  const m = n.match(/^ronda\s*(\d+)$/);
+  if (m) return `Ronda ${m[1]}`;
+  return null;
+}
+
+/** Clave compacta para emparejar slots (1A, GCuartos 1, C1, 1º A…). */
+export function normalizeKnockoutSlotKey(raw: string | null | undefined): string {
+  let s = (raw ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/º/g, "")
+    .replace(/\./g, " ")
+    .replace(/^ganador\s+/i, "")
+    .replace(/^g\s+/i, "")
+    .trim();
+
+  const compact = s.match(/^([OCFS])\s*(\d+)$/i);
+  if (compact) {
+    const map: Record<string, string> = {
+      O: "OCTAVOS",
+      C: "CUARTOS",
+      S: "SEMIFINAL",
+      F: "FINAL",
+    };
+    const letter = compact[1].toUpperCase();
+    const round = map[letter];
+    if (round) return `G${round}${compact[2]}`.replace(/\s+/g, "");
+  }
+
+  return s.replace(/\s+/g, "").toUpperCase();
+}
+
+function extractWhenAndPista(
+  parts: string[],
+  year: number,
+  weekend: WeekendDates,
+): {
+  when: { day: number; month: number; hour: number; minute: number } | null;
+  pista: string | null;
+  rest: string[];
+} {
+  const rest = [...parts];
+  let pista: string | null = null;
+
+  if (rest.length && (/^[ABC]$/i.test(rest[rest.length - 1]) || /^pista\s+/i.test(rest[rest.length - 1]))) {
+    pista = normalizePistaName(rest.pop());
+  }
+
+  let when: { day: number; month: number; hour: number; minute: number } | null = null;
+  if (rest.length) {
+    const dt = parseWhen(rest[rest.length - 1], year, weekend);
+    if (dt) {
+      when = dt;
+      rest.pop();
+    }
+  }
+
+  return { when, pista, rest };
+}
+
+/**
+ * Formatos:
+ * - Champions | 1A vs 2D | DOMINGO 21:00 | C
+ * - Champions | Cuartos | 1º A vs 2º D | DOMINGO 21:00 | B
+ * - Europa | GCuartos 1 vs GCuartos 2 | DOMINGO 23:00 | A
+ * - 1A vs 2D | 14/06 21:00 | C  (si el cruce es unico en la app)
+ */
+export function parseKnockoutScheduleLine(
+  raw: string,
+  year: number,
+  weekend: WeekendDates = defaultWeekend2026(),
+): ParsedKnockoutScheduleLine {
+  const line = raw.trim();
+  if (!line || line.startsWith("#")) {
+    return { ok: false, raw: line, reason: "Linea vacia" };
+  }
+
+  const pipeParts = line.split("|").map((p) => p.trim()).filter(Boolean);
+  if (pipeParts.length < 2) {
+    return {
+      ok: false,
+      raw: line,
+      reason: "Formato no reconocido (minimo: Local vs Visit | DOMINGO 21:00 | C)",
+    };
+  }
+
+  const { when, pista, rest } = extractWhenAndPista(pipeParts, year, weekend);
+  if (!when) {
+    return { ok: false, raw: line, reason: "Fecha u hora no reconocida" };
+  }
+
+  let competicion: string | null = null;
+  let ronda: string | null = null;
+  const tokens = [...rest];
+  while (tokens.length > 1) {
+    const comp = parseCompeticionLabel(tokens[0]);
+    if (comp) {
+      competicion = comp;
+      tokens.shift();
+      continue;
+    }
+    const rnd = parseRondaLabel(tokens[0]);
+    if (rnd) {
+      ronda = rnd;
+      tokens.shift();
+      continue;
+    }
+    break;
+  }
+
+  const teamsPart = tokens.join(" | ");
+  const teams = splitTeams(teamsPart);
+  if (!teams) {
+    return { ok: false, raw: line, reason: "Cruce no reconocido (usa: 1A vs 2D o GCuartos 1 vs GCuartos 2)" };
+  }
+
+  return {
+    ok: true,
+    raw: line,
+    line: {
+      slotLocal: teams.local.trim(),
+      slotVisit: teams.visit.trim(),
+      competicion,
+      ronda,
+      ...when,
+      pista,
+    },
+  };
+}
+
+export function parseKnockoutScheduleText(
+  text: string,
+  year: number,
+  weekend: WeekendDates = defaultWeekend2026(),
+): ParsedKnockoutScheduleLine[] {
+  return text
+    .split(/\r?\n/)
+    .map((raw) => raw.trim())
+    .filter((raw) => raw.length > 0 && !raw.startsWith("#"))
+    .map((raw) => parseKnockoutScheduleLine(raw, year, weekend));
+}
+
+export function findKnockoutPartidoCandidates(
+  partidos: {
+    id: string;
+    slot_local?: string | null;
+    slot_visitante?: string | null;
+    competicion?: string | null;
+    ronda?: string | null;
+    fase?: string | null;
+  }[],
+  line: KnockoutScheduleLineInput,
+  competicionLabel: (stored: string | null | undefined) => string,
+): typeof partidos {
+  const nl = normalizeKnockoutSlotKey(line.slotLocal);
+  const nv = normalizeKnockoutSlotKey(line.slotVisit);
+
+  return partidos.filter((p) => {
+    const fase = (p.fase ?? "").trim();
+    if (!fase.startsWith("Cuadro -") && !fase.startsWith("Cruce")) return false;
+
+    const sl = normalizeKnockoutSlotKey(p.slot_local);
+    const sv = normalizeKnockoutSlotKey(p.slot_visitante);
+    const direct = sl === nl && sv === nv;
+    const reverse = sl === nv && sv === nl;
+    if (!direct && !reverse) return false;
+
+    if (line.competicion && competicionLabel(p.competicion) !== line.competicion) return false;
+    if (line.ronda && (p.ronda ?? "").trim().toLowerCase() !== line.ronda.trim().toLowerCase()) {
+      return false;
+    }
+    return true;
+  });
+}
