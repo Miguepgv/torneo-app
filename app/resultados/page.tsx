@@ -15,20 +15,85 @@ type Partido = {
   equipo_visitante_id: string | null;
 };
 
+function estadoNorm(estado: string | null | undefined) {
+  return (estado ?? "pendiente").toLowerCase();
+}
+
+function faseSortKey(fase: string | null | undefined) {
+  const f = (fase ?? "").trim();
+  if (f.startsWith("Grupo ")) return 0;
+  if (f.startsWith("Cuadro ") || f.startsWith("Cruce ")) return 2;
+  return 1;
+}
+
+/** Orden de juego: fecha/hora ascendente; en directo primero jugándose, luego pendientes. */
+function sortPartidos(list: Partido[], tab: "activos" | "finalizados") {
+  return [...list].sort((a, b) => {
+    if (tab === "activos") {
+      const rank = (e: string) => (e === "jugandose" ? 0 : e === "pendiente" ? 1 : 2);
+      const dr = rank(estadoNorm(a.estado)) - rank(estadoNorm(b.estado));
+      if (dr !== 0) return dr;
+    }
+    const fa = faseSortKey(a.fase);
+    const fb = faseSortKey(b.fase);
+    if (fa !== fb) return fa - fb;
+    const ta = a.fecha_hora ? new Date(a.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    const tb = b.fecha_hora ? new Date(b.fecha_hora).getTime() : Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    return (a.fase ?? "").localeCompare(b.fase ?? "", "es");
+  });
+}
+
+function PartidoCard({
+  p,
+  nombreEquipo,
+}: {
+  p: Partido;
+  nombreEquipo: (id: string | null) => string;
+}) {
+  const vivo = estadoNorm(p.estado) === "jugandose";
+  const finalizado = estadoNorm(p.estado) === "finalizado";
+  return (
+    <Link
+      href={`/resultados/${p.id}`}
+      className={`flex flex-col gap-2 rounded-2xl border-2 p-4 transition hover:shadow-md sm:flex-row sm:items-center sm:justify-between ${
+        vivo
+          ? "border-emerald-400/70 bg-emerald-50/50"
+          : finalizado
+            ? "border-slate-200 bg-slate-50/80 hover:border-slate-300"
+            : "border-amber-200/80 bg-amber-50/30 hover:border-amber-300"
+      }`}
+    >
+      <div>
+        <p className="font-bold text-slate-900">
+          {nombreEquipo(p.equipo_local_id)}{" "}
+          <span className="text-violet-800">{p.goles_local ?? 0}</span>
+          {" — "}
+          <span className="text-violet-800">{p.goles_visitante ?? 0}</span> {nombreEquipo(p.equipo_visitante_id)}
+        </p>
+        <p className="mt-1 text-sm text-slate-600">
+          {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Fecha por confirmar"} ·{" "}
+          {(p.estado ?? "pendiente").replace(/^./, (c) => c.toUpperCase())}
+          {p.fase ? ` · ${p.fase}` : ""}
+        </p>
+      </div>
+      <span className="text-sm font-semibold text-violet-700">Ver detalle →</span>
+    </Link>
+  );
+}
+
 export default function ResultadosPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [nombresEquipo, setNombresEquipo] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [tab, setTab] = useState<"activos" | "finalizados">("activos");
 
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from("partidos")
-      .select(
-        "id,estado,fecha_hora,goles_local,goles_visitante,fase,equipo_local_id,equipo_visitante_id",
-      )
-      .order("fecha_hora", { ascending: false, nullsFirst: false });
+      .select("id,estado,fecha_hora,goles_local,goles_visitante,fase,equipo_local_id,equipo_visitante_id");
 
     if (error) {
       setMessage(`Error cargando partidos: ${error.message}`);
@@ -76,6 +141,16 @@ export default function ResultadosPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const partidosActivos = useMemo(
+    () => sortPartidos(partidos.filter((p) => estadoNorm(p.estado) !== "finalizado"), "activos"),
+    [partidos],
+  );
+  const partidosFinalizados = useMemo(
+    () => sortPartidos(partidos.filter((p) => estadoNorm(p.estado) === "finalizado"), "finalizados"),
+    [partidos],
+  );
+  const visibles = tab === "activos" ? partidosActivos : partidosFinalizados;
+
   function nombreEquipo(id: string | null) {
     if (!id) return "—";
     return nombresEquipo[id] ?? "Equipo";
@@ -87,47 +162,69 @@ export default function ResultadosPage() {
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-violet-900">Resultados</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Lista completa · se refresca cada pocos segundos con los marcadores del directo.
+            Ordenados por horario de juego · se refresca cada pocos segundos con el directo.
           </p>
         </div>
+
+        <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+              tab === "activos" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            onClick={() => setTab("activos")}
+          >
+            En directo / Pendientes
+            {partidosActivos.length > 0 ? (
+              <span
+                className={`ml-2 rounded-full px-2 py-0.5 text-xs ${tab === "activos" ? "bg-white/25" : "bg-violet-100 text-violet-800"}`}
+              >
+                {partidosActivos.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-sm font-semibold ${
+              tab === "finalizados" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            onClick={() => setTab("finalizados")}
+          >
+            Finalizados
+            {partidosFinalizados.length > 0 ? (
+              <span
+                className={`ml-2 rounded-full px-2 py-0.5 text-xs ${tab === "finalizados" ? "bg-white/25" : "bg-slate-300 text-slate-800"}`}
+              >
+                {partidosFinalizados.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
+        {tab === "activos" ? (
+          <p className="mb-3 text-xs text-slate-600">
+            Primero los que se están jugando, después los pendientes, por fecha y hora del calendario (grupos antes que
+            cruces).
+          </p>
+        ) : (
+          <p className="mb-3 text-xs text-slate-600">Partidos ya cerrados, del primero al último según horario.</p>
+        )}
 
         {loading ? <p>Cargando...</p> : null}
         {message ? (
           <p className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{message}</p>
         ) : null}
 
-        {!loading && partidos.length === 0 ? (
-          <p className="text-slate-600">No hay partidos registrados aun.</p>
+        {!loading && visibles.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-600">
+            {tab === "activos" ? "No hay partidos pendientes ni en juego." : "Aún no hay partidos finalizados."}
+          </p>
         ) : null}
 
         <div className="grid gap-3">
-          {partidos.map((p) => {
-            const vivo = (p.estado ?? "").toLowerCase() === "jugandose";
-            return (
-              <Link
-                key={p.id}
-                href={`/resultados/${p.id}`}
-                className={`flex flex-col gap-2 rounded-2xl border-2 p-4 transition hover:shadow-md sm:flex-row sm:items-center sm:justify-between ${
-                  vivo ? "border-emerald-400/70 bg-emerald-50/50" : "border-slate-200 bg-white hover:border-violet-200"
-                }`}
-              >
-              <div>
-                <p className="font-bold text-slate-900">
-                  {nombreEquipo(p.equipo_local_id)} <span className="text-violet-800">{p.goles_local ?? 0}</span>
-                  {" — "}
-                  <span className="text-violet-800">{p.goles_visitante ?? 0}</span> {nombreEquipo(p.equipo_visitante_id)}
-                </p>
-                <p className="mt-1 text-sm text-slate-600">
-                  {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Fecha por confirmar"} · {(p.estado ?? "—").replace(/^./, (c) =>
-                    c.toUpperCase(),
-                  )}
-                  {p.fase ? ` · ${p.fase}` : ""}
-                </p>
-              </div>
-              <span className="text-sm font-semibold text-violet-700">Ver detalle →</span>
-            </Link>
-            );
-          })}
+          {visibles.map((p) => (
+            <PartidoCard key={p.id} p={p} nombreEquipo={nombreEquipo} />
+          ))}
         </div>
       </div>
     </main>
