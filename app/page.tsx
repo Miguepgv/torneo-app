@@ -216,7 +216,7 @@ export default function Home() {
 
         <section>
           <h2 className="mb-4 text-lg font-bold text-slate-800">Accesos rápidos</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Link
               href="/clasificaciones"
               className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-600 to-indigo-700 p-5 text-white shadow-lg transition hover:scale-[1.02] hover:shadow-xl"
@@ -244,6 +244,13 @@ export default function Home() {
             >
               <p className="text-sm font-semibold text-slate-500">Ranking</p>
               <p className="mt-1 text-lg font-bold text-slate-900">Goleadores</p>
+            </Link>
+            <Link
+              href="/incidencias"
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-md transition hover:border-violet-300 hover:shadow-lg"
+            >
+              <p className="text-sm font-semibold text-slate-500">Fair play</p>
+              <p className="mt-1 text-lg font-bold text-slate-900">Incidencias</p>
             </Link>
           </div>
         </section>
