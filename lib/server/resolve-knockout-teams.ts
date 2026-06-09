@@ -91,10 +91,16 @@ function resolveFromWinnerSlot(
   return knockoutWinner(feeder);
 }
 
+function isStandingsSlot(slot: string | null | undefined) {
+  const trimmed = (slot ?? "").trim();
+  if (!trimmed || trimmed.toUpperCase() === "BYE") return false;
+  return !trimmed.toUpperCase().startsWith("G");
+}
+
 function resolveSide(
   side: "local" | "visitante",
   match: KnockoutPartido,
-  slotMap: Map<string, string> | null,
+  slotMap: Map<string, string>,
   koPartidos: KnockoutPartido[],
 ): string | null {
   const slot = side === "local" ? match.slot_local : match.slot_visitante;
@@ -105,11 +111,24 @@ function resolveSide(
     return resolveFromWinnerSlot(slot, match, koPartidos);
   }
 
-  if (slotMap) {
-    return resolveFromStandingsSlot(slot, slotMap);
-  }
-
+  const resolved = resolveFromStandingsSlot(slot, slotMap);
+  if (resolved) return resolved;
+  if (isStandingsSlot(slot)) return null;
   return null;
+}
+
+function resolveKnockoutSide(
+  side: "local" | "visitante",
+  match: KnockoutPartido,
+  slotMap: Map<string, string>,
+  koPartidos: KnockoutPartido[],
+  currentId: string | null,
+): string | null {
+  const resolved = resolveSide(side, match, slotMap, koPartidos);
+  if (resolved) return resolved;
+  const slot = side === "local" ? match.slot_local : match.slot_visitante;
+  if (isStandingsSlot(slot)) return null;
+  return currentId;
 }
 
 /** Rellena equipos en cruces cuando la fase de grupos ha terminado y propaga ganadores G-slots. */
@@ -137,8 +156,7 @@ export async function syncKnockoutTeams(admin: SupabaseClient): Promise<Knockout
 
   const finalizedGroups = finalizedGroupNames(allPartidos);
   const groupsComplete = allGroupMatchesFinalized(allPartidos);
-  let slotMap: Map<string, string> | null = null;
-
+  let slotMap: Map<string, string>;
   if (finalizedGroups.size > 0) {
     const groupScorePartidos = allPartidos.filter(
       (p) => (p.fase ?? "").startsWith("Grupo ") && partidoTieneResultado(p),
@@ -153,6 +171,8 @@ export async function syncKnockoutTeams(admin: SupabaseClient): Promise<Knockout
         includeBestSlots: groupsComplete,
       },
     );
+  } else {
+    slotMap = new Map();
   }
 
   let updated = 0;
@@ -164,14 +184,12 @@ export async function syncKnockoutTeams(admin: SupabaseClient): Promise<Knockout
       const curLocal = p.equipo_local_id ?? null;
       const curVisit = p.equipo_visitante_id ?? null;
 
-      const resolvedLocal = resolveSide("local", p, slotMap, koPartidos);
-      const resolvedVisit = resolveSide("visitante", p, slotMap, koPartidos);
-      const nextLocal = resolvedLocal ?? curLocal;
-      const nextVisit = resolvedVisit ?? curVisit;
+      const nextLocal = resolveKnockoutSide("local", p, slotMap, koPartidos, curLocal);
+      const nextVisit = resolveKnockoutSide("visitante", p, slotMap, koPartidos, curVisit);
 
       const patch: Record<string, string | null> = {};
-      if (nextLocal && nextLocal !== curLocal) patch.equipo_local_id = nextLocal;
-      if (nextVisit && nextVisit !== curVisit) patch.equipo_visitante_id = nextVisit;
+      if (nextLocal !== curLocal) patch.equipo_local_id = nextLocal;
+      if (nextVisit !== curVisit) patch.equipo_visitante_id = nextVisit;
 
       if (Object.keys(patch).length) {
         const up = await admin.from("partidos").update(patch).eq("id", p.id);
@@ -184,8 +202,8 @@ export async function syncKnockoutTeams(admin: SupabaseClient): Promise<Knockout
             reason: up.error.message,
           };
         }
-        if (patch.equipo_local_id) p.equipo_local_id = patch.equipo_local_id;
-        if (patch.equipo_visitante_id) p.equipo_visitante_id = patch.equipo_visitante_id;
+        if ("equipo_local_id" in patch) p.equipo_local_id = patch.equipo_local_id;
+        if ("equipo_visitante_id" in patch) p.equipo_visitante_id = patch.equipo_visitante_id;
         updated += Object.keys(patch).length;
         changedThisPass = true;
       }

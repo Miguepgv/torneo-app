@@ -8,10 +8,21 @@ export type PartidoConResultado = {
   estado?: string | null;
 };
 
+function estadoPartido(p: PartidoConResultado) {
+  return (p.estado ?? "pendiente").toLowerCase();
+}
+
+/** Clasificación en directo: cuenta jugándose y finalizado (no pendiente). */
+export function partidoCuentaEnClasificacion(p: PartidoConResultado): boolean {
+  if (!p.equipo_local_id || !p.equipo_visitante_id) return false;
+  const e = estadoPartido(p);
+  return e === "finalizado" || e === "jugandose";
+}
+
+/** Solo partidos cerrados (cuadro, cierre de grupo). */
 export function partidoTieneResultado(p: PartidoConResultado): boolean {
   if (!p.equipo_local_id || !p.equipo_visitante_id) return false;
-  if (p.goles_local != null && p.goles_visitante != null) return true;
-  return (p.estado ?? "").toLowerCase() === "finalizado";
+  return estadoPartido(p) === "finalizado";
 }
 
 export function golesPartidoLocal(p: PartidoConResultado): number {

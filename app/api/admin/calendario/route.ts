@@ -504,15 +504,26 @@ export async function POST(request: NextRequest) {
     if (!estado) return NextResponse.json({ error: "Falta estado." }, { status: 400 });
     const allowed = ["pendiente", "jugandose", "finalizado"];
     if (!allowed.includes(estado)) return NextResponse.json({ error: "Estado no valido." }, { status: 400 });
-    const up = await admin.from("partidos").update({ estado }).eq("id", body.id);
+    const patch: Record<string, unknown> = { estado };
+    if (estado === "pendiente") {
+      patch.goles_local = null;
+      patch.goles_visitante = null;
+      patch.amarillas_local = 0;
+      patch.amarillas_visitante = 0;
+      patch.rojas_local = 0;
+      patch.rojas_visitante = 0;
+      patch.rojas_agresion_local = 0;
+      patch.rojas_agresion_visitante = 0;
+    }
+    const up = await admin.from("partidos").update(patch).eq("id", body.id);
     if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
 
     let knockoutSync = null;
     if (estado === "finalizado") {
       const recalc = await recalcPartidoStats(admin, body.id);
       if (recalc.error) return NextResponse.json({ error: recalc.error }, { status: 400 });
-      knockoutSync = await syncKnockoutTeams(admin);
     }
+    knockoutSync = await syncKnockoutTeams(admin);
 
     return NextResponse.json({ ok: true, knockout_sync: knockoutSync });
   }

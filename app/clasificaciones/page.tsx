@@ -6,8 +6,16 @@ import { tituloCompeticionMostrar } from "@/lib/torneo-constants";
 import {
   golesPartidoLocal,
   golesPartidoVisitante,
-  partidoTieneResultado,
+  partidoCuentaEnClasificacion,
 } from "@/lib/partido-resultado";
+import {
+  allGroupMatchesFinalized,
+  finalizedGroupNames,
+  knockoutSlotHintLabel,
+  knockoutSlotPrimaryLabel,
+  normalizeKoSlotKey,
+  type KnockoutSlotLockContext,
+} from "@/lib/knockout-grupos";
 
 type Equipo = { id: string; nombre: string };
 type Partido = {
@@ -17,6 +25,7 @@ type Partido = {
   goles_local: number | null;
   goles_visitante: number | null;
   estado?: string | null;
+  fase?: string | null;
   faltas_local?: number | null;
   faltas_visitante?: number | null;
   amarillas_local?: number | null;
@@ -205,14 +214,26 @@ function formatPlaceholderSlot(slot: string): string {
   return slot.trim();
 }
 
-function knockoutSidePrimary(m: KnockoutMatch, side: "local" | "visitante", teamNames: Record<string, string>) {
+function knockoutSidePrimary(
+  m: KnockoutMatch,
+  side: "local" | "visitante",
+  teamNames: Record<string, string>,
+  ctx: KnockoutSlotLockContext,
+) {
   const id = side === "local" ? m.equipo_local_id : m.equipo_visitante_id;
   const slot = side === "local" ? m.slot_local : m.slot_visitante;
-  if (id) return teamNames[id] ?? "—";
-  const s = (slot ?? "").trim();
-  if (!s) return "—";
-  if (s.toUpperCase() === "BYE") return "Pase directo";
-  return formatPlaceholderSlot(s);
+  return knockoutSlotPrimaryLabel(slot, id, teamNames, formatPlaceholderSlot, ctx);
+}
+
+function knockoutSideHintLine(
+  m: KnockoutMatch,
+  side: "local" | "visitante",
+  hints: Map<string, string>,
+  ctx: KnockoutSlotLockContext,
+) {
+  const slot = side === "local" ? m.slot_local : m.slot_visitante;
+  const hint = liveStandingHint(slot, hints);
+  return knockoutSlotHintLabel(slot, hint, ctx);
 }
 
 function knockoutCompTheme(comp: string) {
@@ -257,10 +278,6 @@ function knockoutCompTheme(comp: string) {
   };
 }
 
-function normalizeKoSlotKey(raw: string): string {
-  return raw.trim().replace(/\s+/g, "").toUpperCase();
-}
-
 function sameKnockRound(a: string | null | undefined, b: string | null | undefined) {
   return (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
 }
@@ -301,12 +318,6 @@ function liveStandingHint(slot: string | null | undefined, hints: Map<string, st
   if (/^M5F/i.test(trimmed)) return "5.º Conference Cofrade (clasif. provisional)";
   if (/^M\d/i.test(trimmed)) return "Mejor clasificado (provisional)";
   return hints.get(normalizeKoSlotKey(trimmed)) ?? null;
-}
-
-function knockoutSideHintLine(m: KnockoutMatch, side: "local" | "visitante", hints: Map<string, string>): string | null {
-  const id = side === "local" ? m.equipo_local_id : m.equipo_visitante_id;
-  if (id) return null;
-  return liveStandingHint(side === "local" ? m.slot_local : m.slot_visitante, hints);
 }
 
 function findFeederMatch(
@@ -386,13 +397,14 @@ function KnockoutMatchCard(props: {
   theme: KnockoutTheme;
   teamNames: Record<string, string>;
   hints: Map<string, string>;
+  slotLockCtx: KnockoutSlotLockContext;
 }) {
-  const { m, theme, teamNames, hints } = props;
+  const { m, theme, teamNames, hints, slotLockCtx } = props;
   const code = knockoutMatchSlotCode(m.ronda, m.orden);
-  const localPrimary = knockoutSidePrimary(m, "local", teamNames);
-  const visitPrimary = knockoutSidePrimary(m, "visitante", teamNames);
-  const localHint = knockoutSideHintLine(m, "local", hints);
-  const visitHint = knockoutSideHintLine(m, "visitante", hints);
+  const localPrimary = knockoutSidePrimary(m, "local", teamNames, slotLockCtx);
+  const visitPrimary = knockoutSidePrimary(m, "visitante", teamNames, slotLockCtx);
+  const localHint = knockoutSideHintLine(m, "local", hints, slotLockCtx);
+  const visitHint = knockoutSideHintLine(m, "visitante", hints, slotLockCtx);
 
   return (
     <div className={`w-[min(100%,236px)] rounded-xl border-2 p-3 transition ${theme.matchCard}`}>
@@ -445,32 +457,35 @@ function BracketSubtree(props: {
   theme: KnockoutTheme;
   teamNames: Record<string, string>;
   hints: Map<string, string>;
+  slotLockCtx: KnockoutSlotLockContext;
 }) {
-  const { node, theme, teamNames, hints } = props;
+  const { node, theme, teamNames, hints, slotLockCtx } = props;
   if (node.kind === "leaf") {
-    return <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} />;
+    return (
+      <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
+    );
   }
   if (node.kind === "single") {
     return (
       <div className="flex flex-row flex-nowrap items-center gap-2">
-        <BracketSubtree node={node.child} theme={theme} teamNames={teamNames} hints={hints} />
+        <BracketSubtree node={node.child} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
         <div className="flex min-h-[3.75rem] w-10 shrink-0 self-stretch sm:w-14">
           <BracketForkSvg variant="single" />
         </div>
-        <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} />
+        <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
       </div>
     );
   }
   return (
     <div className="flex flex-row flex-nowrap items-center gap-2">
       <div className="flex shrink-0 flex-col justify-evenly gap-14 py-12 sm:gap-24 sm:py-16">
-        <BracketSubtree node={node.up} theme={theme} teamNames={teamNames} hints={hints} />
-        <BracketSubtree node={node.down} theme={theme} teamNames={teamNames} hints={hints} />
+        <BracketSubtree node={node.up} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
+        <BracketSubtree node={node.down} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
       </div>
       <div className="flex min-h-[10rem] w-10 shrink-0 self-stretch sm:min-h-[13rem] sm:w-14">
         <BracketForkSvg variant="dual" />
       </div>
-      <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} />
+      <KnockoutMatchCard m={node.match} theme={theme} teamNames={teamNames} hints={hints} slotLockCtx={slotLockCtx} />
     </div>
   );
 }
@@ -484,6 +499,7 @@ export default function ClasificacionesPage() {
   const [message, setMessage] = useState("");
   const [viewMode, setViewMode] = useState<"grupos" | "cuadro">("grupos");
   const [knockout, setKnockout] = useState<KnockoutMatch[]>([]);
+  const [groupPartidos, setGroupPartidos] = useState<Partido[]>([]);
   const [teamNames, setTeamNames] = useState<Record<string, string>>({});
   const [poll, setPoll] = useState(0);
 
@@ -502,7 +518,7 @@ export default function ClasificacionesPage() {
           supabase.from("equipos").select("id,nombre,grupo").order("nombre"),
           supabase
             .from("partidos")
-            .select("id,equipo_local_id,equipo_visitante_id,goles_local,goles_visitante,estado,faltas_local,faltas_visitante,amarillas_local,amarillas_visitante,rojas_local,rojas_visitante,rojas_agresion_local,rojas_agresion_visitante"),
+            .select("id,equipo_local_id,equipo_visitante_id,goles_local,goles_visitante,estado,fase,faltas_local,faltas_visitante,amarillas_local,amarillas_visitante,rojas_local,rojas_visitante,rojas_agresion_local,rojas_agresion_visitante"),
           supabase.from("configuracion_torneo").select("*").limit(1).maybeSingle(),
           supabase
             .from("partidos")
@@ -527,6 +543,7 @@ export default function ClasificacionesPage() {
 
       const equipos = (equiposData as (Equipo & { grupo?: string | null })[]) ?? [];
       const partidos = (partidosData as Partido[]) ?? [];
+      setGroupPartidos(partidos);
       const cfg = (cfgData as TournamentConfig | null) ?? null;
       const ko = (koData as KnockoutMatch[]) ?? [];
       setKnockout(ko);
@@ -562,7 +579,7 @@ export default function ClasificacionesPage() {
       }
 
       for (const p of partidos) {
-        if (!partidoTieneResultado(p)) continue;
+        if (!partidoCuentaEnClasificacion(p)) continue;
         const gl = golesPartidoLocal(p);
         const gv = golesPartidoVisitante(p);
         const l = table[p.equipo_local_id!];
@@ -608,7 +625,7 @@ export default function ClasificacionesPage() {
         let aPts = 0;
         let bPts = 0;
         for (const p of partidos) {
-          if (!partidoTieneResultado(p)) continue;
+          if (!partidoCuentaEnClasificacion(p)) continue;
           const gl = golesPartidoLocal(p);
           const gv = golesPartidoVisitante(p);
           const direct =
@@ -667,7 +684,7 @@ export default function ClasificacionesPage() {
         if (!excludeLastForBest || !rivalId) return { ...row };
         const out: StandingsRow = { ...row };
         for (const p of partidos) {
-          if (!partidoTieneResultado(p)) continue;
+          if (!partidoCuentaEnClasificacion(p)) continue;
           const gl = golesPartidoLocal(p);
           const gv = golesPartidoVisitante(p);
           const affects =
@@ -789,6 +806,15 @@ export default function ClasificacionesPage() {
   }, [rows]);
 
   const standingSlotHints = useMemo(() => buildStandingPlaceholderHints(rows), [rows]);
+
+  const slotLockCtx = useMemo((): KnockoutSlotLockContext => {
+    const groupNames = [...new Set(rows.map((r) => (r.grupo ?? "").trim()).filter(Boolean))];
+    return {
+      finalizedGroups: finalizedGroupNames(groupPartidos),
+      groupsComplete: allGroupMatchesFinalized(groupPartidos),
+      groupNames,
+    };
+  }, [groupPartidos, rows]);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-100 to-violet-50/30 p-4 pb-14 sm:p-8">
@@ -930,6 +956,7 @@ export default function ClasificacionesPage() {
                               theme={theme}
                               teamNames={teamNames}
                               hints={standingSlotHints}
+                              slotLockCtx={slotLockCtx}
                             />
                           </div>
                         </div>
@@ -953,6 +980,7 @@ export default function ClasificacionesPage() {
                                         theme={theme}
                                         teamNames={teamNames}
                                         hints={standingSlotHints}
+                                        slotLockCtx={slotLockCtx}
                                       />
                                     ))}
                                 </div>

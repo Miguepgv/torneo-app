@@ -4,6 +4,13 @@ import {
   golesPartidoVisitante,
   partidoTieneResultado,
 } from "@/lib/partido-resultado";
+import {
+  allGroupMatchesFinalized,
+  finalizedGroupNames,
+  groupNameFromFase,
+} from "@/lib/knockout-grupos";
+
+export { allGroupMatchesFinalized, finalizedGroupNames, groupNameFromFase } from "@/lib/knockout-grupos";
 
 export type StandingsPartido = {
   equipo_local_id: string | null;
@@ -122,32 +129,6 @@ export type SlotMapOptions = {
   /** Mejores 2.º/3.º entre grupos (M2C-1…): solo cuando todos los grupos han terminado. */
   includeBestSlots: boolean;
 };
-
-/** Extrae el nombre de grupo tal como está en equipos.grupo (fase "Grupo X" → "X"). */
-export function groupNameFromFase(fase: string | null | undefined): string | null {
-  const m = (fase ?? "").trim().match(/^Grupo\s+(.+)$/i);
-  return m ? m[1].trim() : null;
-}
-
-/** Grupos con todos sus partidos en estado finalizado. */
-export function finalizedGroupNames(
-  partidos: Array<{ fase?: string | null; estado?: string | null }>,
-): Set<string> {
-  const tallies = new Map<string, { total: number; done: number }>();
-  for (const p of partidos) {
-    const g = groupNameFromFase(p.fase);
-    if (!g) continue;
-    const t = tallies.get(g) ?? { total: 0, done: 0 };
-    t.total += 1;
-    if ((p.estado ?? "").toLowerCase() === "finalizado") t.done += 1;
-    tallies.set(g, t);
-  }
-  const out = new Set<string>();
-  for (const [g, { total, done }] of tallies) {
-    if (total > 0 && total === done) out.add(g);
-  }
-  return out;
-}
 
 /** Mapa slot normalizado (1A, M2C-1…) → equipo_id según clasificación de grupos. */
 export function computeSlotToTeamMap(
@@ -432,12 +413,4 @@ export function computeSlotToTeamMap(
   }
 
   return slotMap;
-}
-
-export function allGroupMatchesFinalized(
-  partidos: Array<{ fase?: string | null; estado?: string | null }>,
-): boolean {
-  const groupMatches = partidos.filter((p) => (p.fase ?? "").startsWith("Grupo "));
-  if (!groupMatches.length) return false;
-  return groupMatches.every((p) => (p.estado ?? "").toLowerCase() === "finalizado");
 }
