@@ -17,8 +17,27 @@ function normalizeTeamName(s: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function nameTokens(s: string): string[] {
+  return normalizeTeamName(s)
+    .split(" ")
+    .filter((t) => t.length > 1);
+}
+
+function nameMatchScore(target: string, candidate: string): number {
+  const a = nameTokens(target);
+  const b = nameTokens(candidate);
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  let common = 0;
+  for (const t of a) {
+    if (setB.has(t)) common += 1;
+  }
+  return common / Math.max(a.length, b.length);
 }
 
 /** dd/mm/yyyy HH:mm o dd/mm HH:mm */
@@ -125,8 +144,9 @@ export function parseScheduleLine(raw: string, year: number): ParsedScheduleLine
 export function parseScheduleText(text: string, year: number): ParsedScheduleLine[] {
   return text
     .split(/\r?\n/)
-    .map((raw) => parseScheduleLine(raw, year))
-    .filter((r) => r.raw.length > 0);
+    .map((raw) => raw.trim())
+    .filter((raw) => raw.length > 0 && !raw.startsWith("#"))
+    .map((raw) => parseScheduleLine(raw, year));
 }
 
 export function findTeamIdByName(
@@ -139,10 +159,24 @@ export function findTeamIdByName(
   const exact = equipos.find((e) => normalizeTeamName(e.nombre) === target);
   if (exact) return exact.id;
 
-  const contains = equipos.filter(
-    (e) => normalizeTeamName(e.nombre).includes(target) || target.includes(normalizeTeamName(e.nombre)),
-  );
+  const contains = equipos.filter((e) => {
+    const n = normalizeTeamName(e.nombre);
+    return n.includes(target) || target.includes(n);
+  });
   if (contains.length === 1) return contains[0].id;
+
+  let bestId: string | null = null;
+  let bestScore = 0;
+  for (const e of equipos) {
+    const score = nameMatchScore(name, e.nombre);
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = e.id;
+    } else if (score === bestScore && score >= 0.55) {
+      bestId = null;
+    }
+  }
+  if (bestId && bestScore >= 0.55) return bestId;
   return null;
 }
 

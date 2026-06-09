@@ -60,7 +60,9 @@ export default function AdminCalendarioPage() {
   const [tab, setTab] = useState<"calendario" | "cruces" | "horarios">("calendario");
   const [msg, setMsg] = useState("");
   const [scheduleText, setScheduleText] = useState("");
-  const [scheduleYear, setScheduleYear] = useState(String(new Date().getFullYear()));
+  const [scheduleYear, setScheduleYear] = useState("2026");
+  const [applyingSchedule, setApplyingSchedule] = useState(false);
+  const [scheduleResult, setScheduleResult] = useState("");
   const [startDm, setStartDm] = useState("");
   const [startHm, setStartHm] = useState("18:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
@@ -194,29 +196,80 @@ export default function AdminCalendarioPage() {
     }
   }
 
+  async function onLoadScheduleTemplate() {
+    try {
+      const res = await fetch("/horarios-2026-import.txt");
+      if (!res.ok) throw new Error("No se encontro la plantilla.");
+      const text = await res.text();
+      setScheduleText(text.trim());
+      setScheduleResult("Plantilla 12-14 junio cargada. Pulsa Aplicar horarios.");
+    } catch (e) {
+      setScheduleResult(e instanceof Error ? e.message : "Error cargando plantilla.");
+    }
+  }
+
   async function onApplySchedule() {
     if (!scheduleText.trim()) {
+      setScheduleResult("Pega las lineas del horario o pulsa Cargar plantilla.");
       setMsg("Pega las lineas del horario.");
       return;
     }
+    const gruposCount = partidos.filter((p) => (p.fase ?? "").startsWith("Grupo ")).length;
+    if (gruposCount === 0) {
+      setScheduleResult(
+        "No hay partidos de grupos. Primero ve a Generar calendario y crea los partidos.",
+      );
+      setMsg("Genera antes el calendario de grupos.");
+      return;
+    }
+    setApplyingSchedule(true);
+    setScheduleResult("Aplicando horarios...");
     try {
-      setMsg("Aplicando horarios...");
       const r = (await api({
         action: "apply_schedule",
         text: scheduleText,
-        year: Number(scheduleYear) || new Date().getFullYear(),
+        year: Number(scheduleYear) || 2026,
       })) as {
         updated?: number;
         skipped?: string[];
         errors?: string[];
+        parsedOk?: number;
+        partidosGrupo?: number;
+        equiposEnApp?: string[];
       };
-      const parts = [`Actualizados: ${r.updated ?? 0} partidos.`];
-      if (r.skipped?.length) parts.push(`Omitidos: ${r.skipped.slice(0, 5).join(" · ")}${(r.skipped.length ?? 0) > 5 ? "…" : ""}`);
-      if (r.errors?.length) parts.push(`Errores: ${r.errors.slice(0, 3).join(" · ")}`);
-      setMsg(parts.join("\n"));
+      const parts: string[] = [];
+      parts.push(`Actualizados: ${r.updated ?? 0} de ${r.parsedOk ?? 0} lineas validas.`);
+      if ((r.updated ?? 0) === 0) {
+        parts.push(
+          "Ningun partido se actualizo. Revisa que los nombres coincidan con los equipos en la app.",
+        );
+        if (r.equiposEnApp?.length) {
+          parts.push(`Equipos en la app: ${r.equiposEnApp.join(" · ")}`);
+        }
+      }
+      if (r.skipped?.length) {
+        parts.push("Omitidos:");
+        parts.push(...r.skipped.slice(0, 12));
+        if (r.skipped.length > 12) parts.push(`... y ${r.skipped.length - 12} mas`);
+      }
+      if (r.errors?.length) {
+        parts.push("Errores de formato:");
+        parts.push(...r.errors.slice(0, 8));
+      }
+      const text = parts.join("\n");
+      setScheduleResult(text);
+      setMsg(text);
       await load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Error aplicando horarios.");
+      const err = e instanceof Error ? e.message : "Error aplicando horarios.";
+      setScheduleResult(
+        err.includes("no soportada") || err.includes("Accion")
+          ? `${err}\n\nParece que produccion no tiene la ultima version. Haz git push y espera el deploy en Vercel.`
+          : err,
+      );
+      setMsg(err);
+    } finally {
+      setApplyingSchedule(false);
     }
   }
 
@@ -601,24 +654,40 @@ export default function AdminCalendarioPage() {
             <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
               Equipo Local vs Equipo Visitante | 27/05 18:00 | Pista 1
             </p>
-            <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="mb-2 flex flex-wrap gap-2">
               <input
-                className="rounded-lg border border-slate-300 p-2 text-sm"
+                className="w-28 rounded-lg border border-slate-300 p-2 text-sm"
                 type="number"
                 min={2024}
                 max={2030}
                 value={scheduleYear}
                 onChange={(e) => setScheduleYear(e.target.value)}
-                placeholder="Ano (ej. 2026)"
+                placeholder="Ano"
               />
               <button
-                className="rounded-lg bg-violet-600 px-4 py-2 font-semibold text-white"
+                className="rounded-lg border border-violet-300 px-3 py-2 text-sm font-semibold text-violet-800"
                 type="button"
+                onClick={() => void onLoadScheduleTemplate()}
+              >
+                Cargar plantilla 12-14 jun
+              </button>
+              <button
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                type="button"
+                disabled={applyingSchedule}
                 onClick={() => void onApplySchedule()}
               >
-                Aplicar horarios
+                {applyingSchedule ? "Aplicando..." : "Aplicar horarios"}
               </button>
             </div>
+            {scheduleResult ? (
+              <pre className="mb-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                {scheduleResult}
+              </pre>
+            ) : null}
+            <p className="mb-2 text-xs text-slate-600">
+              Partidos de grupos en la app: {groupMatches.length}. Si es 0, genera el calendario antes.
+            </p>
             <textarea
               className="min-h-[180px] w-full rounded-lg border border-slate-300 p-3 font-mono text-sm"
               value={scheduleText}

@@ -524,12 +524,22 @@ export async function POST(request: NextRequest) {
       updated += 1;
     }
 
+    const partidosGrupo = ((partidos ?? []) as { id: string }[]).filter((p) =>
+      Boolean(
+        (p as { equipo_local_id?: string | null }).equipo_local_id &&
+          (p as { equipo_visitante_id?: string | null }).equipo_visitante_id,
+      ),
+    ).length;
+
     return NextResponse.json({
       ok: true,
       updated,
       skipped,
       errors,
-      parsed: parsed.filter((r) => r.ok).length,
+      parsedOk: parsed.filter((r) => r.ok).length,
+      parsedTotal: parsed.length,
+      partidosGrupo,
+      equiposEnApp: teamList.map((t) => t.nombre).sort((a, b) => a.localeCompare(b, "es")),
     });
   }
 
