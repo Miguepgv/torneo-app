@@ -353,6 +353,9 @@ export default function AdminCalendarioPage() {
         weekendDomingo,
       })) as {
         updated?: number;
+        pistasAsignadas?: number;
+        pistaWarnings?: string[];
+        pistasEnApp?: string[];
         skipped?: string[];
         errors?: string[];
         parsedOk?: number;
@@ -361,6 +364,12 @@ export default function AdminCalendarioPage() {
       };
       const parts: string[] = [];
       parts.push(`Actualizados: ${r.updated ?? 0} de ${r.parsedOk ?? 0} lineas validas.`);
+      if (typeof r.pistasAsignadas === "number") {
+        parts.push(`Pistas asignadas: ${r.pistasAsignadas}.`);
+      }
+      if (r.pistasEnApp?.length) {
+        parts.push(`Pistas en admin: ${r.pistasEnApp.join(", ")}.`);
+      }
       if ((r.updated ?? 0) === 0) {
         parts.push(
           "Ningun partido se actualizo. Revisa que los nombres coincidan con los equipos en la app.",
@@ -373,6 +382,11 @@ export default function AdminCalendarioPage() {
         parts.push("Omitidos:");
         parts.push(...r.skipped.slice(0, 12));
         if (r.skipped.length > 12) parts.push(`... y ${r.skipped.length - 12} mas`);
+      }
+      if (r.pistaWarnings?.length) {
+        parts.push("Avisos de pista:");
+        parts.push(...r.pistaWarnings.slice(0, 8));
+        if (r.pistaWarnings.length > 8) parts.push(`... y ${r.pistaWarnings.length - 8} mas`);
       }
       if (r.errors?.length) {
         parts.push("Errores de formato:");
@@ -854,7 +868,8 @@ export default function AdminCalendarioPage() {
             </p>
             <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
               Torneo nocturno: <strong>SABADO 1:00</strong> es la madrugada del viernes al sabado (01:00), no las 13:00.
-              La pista va con letra: A, B o C.
+              La pista va con letra: A, B o C. Deben existir en admin como{" "}
+              <strong>Pista A</strong>, <strong>Pista B</strong> y <strong>Pista C</strong> (o solo A, B, C).
             </p>
             <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
               Equipo Local vs Equipo Visitante | VIERNES 21:00 | C
@@ -1320,6 +1335,9 @@ function EditableMatchRow({
         </select>
         <select className="rounded border border-slate-300 p-2 text-sm" value={pista} onChange={(e) => setPista(e.target.value)}>
           <option value="">Pista</option>
+          {pista && !pistas.some((p) => p.nombre === pista) ? (
+            <option value={pista}>{pista}</option>
+          ) : null}
           {pistas.map((p) => (
             <option key={p.id} value={p.nombre}>{p.nombre}</option>
           ))}

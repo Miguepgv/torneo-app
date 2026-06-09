@@ -3,8 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { TORNEO_COMPETICIONES, TORNEO_COMPETICION_KO_GENERICA } from "@/lib/torneo-constants";
 import {
   findTeamIdByName,
-  normalizePistaName,
   parseScheduleText,
+  resolvePistaNombre,
   toIsoFromParts,
   weekendFromStrings,
 } from "@/lib/server/parse-schedule-lines";
@@ -468,21 +468,27 @@ export async function POST(request: NextRequest) {
       domingo: body.weekendDomingo,
     });
 
-    const [{ data: equipos, error: eErr }, { data: partidos, error: pErr }] = await Promise.all([
-      admin.from("equipos").select("id,nombre"),
-      admin
-        .from("partidos")
-        .select("id,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante,fase"),
-    ]);
+    const [{ data: equipos, error: eErr }, { data: partidos, error: pErr }, { data: pistas, error: piErr }] =
+      await Promise.all([
+        admin.from("equipos").select("id,nombre"),
+        admin
+          .from("partidos")
+          .select("id,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante,fase"),
+        admin.from("pistas").select("id,nombre").order("nombre"),
+      ]);
     if (eErr) return NextResponse.json({ error: eErr.message }, { status: 400 });
     if (pErr) return NextResponse.json({ error: pErr.message }, { status: 400 });
+    if (piErr) return NextResponse.json({ error: piErr.message }, { status: 400 });
 
     const teamList = (equipos ?? []) as { id: string; nombre: string }[];
+    const pistaList = (pistas ?? []) as { id: string; nombre: string }[];
     const parsed = parseScheduleText(text, year, weekend);
 
     let updated = 0;
+    let pistasAsignadas = 0;
     const skipped: string[] = [];
     const errors: string[] = [];
+    const pistaWarnings: string[] = [];
 
     for (const row of parsed) {
       if (!row.ok) {
@@ -528,8 +534,14 @@ export async function POST(request: NextRequest) {
         year,
       );
       const patch: Record<string, unknown> = { fecha_hora: fechaIso };
-      const pista = normalizePistaName(row.line.pista);
-      if (pista) patch.pista = pista;
+      const resolved = resolvePistaNombre(row.line.pista, pistaList);
+      if (resolved.nombre) {
+        patch.pista = resolved.nombre;
+        pistasAsignadas += 1;
+      }
+      if (resolved.warning) {
+        pistaWarnings.push(`${row.line.localName} vs ${row.line.visitName}: ${resolved.warning}`);
+      }
 
       const up = await admin.from("partidos").update(patch).eq("id", candidates[0].id);
       if (up.error) {
@@ -549,6 +561,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       updated,
+      pistasAsignadas,
+      pistaWarnings,
+      pistasEnApp: pistaList.map((p) => p.nombre),
       skipped,
       errors,
       parsedOk: parsed.filter((r) => r.ok).length,

@@ -160,6 +160,15 @@ function parseWhen(
   return parsePdfDayTime(raw, weekend) ?? parseDateTime(raw, year);
 }
 
+function normalizePistaLabel(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** C / B / A del PDF → Pista C */
 export function normalizePistaName(raw: string | null | undefined): string | null {
   const t = (raw ?? "").trim();
@@ -167,6 +176,62 @@ export function normalizePistaName(raw: string | null | undefined): string | nul
   if (/^pista\s+/i.test(t)) return t.replace(/\s+/g, " ");
   if (/^[ABC]$/i.test(t)) return `Pista ${t.toUpperCase()}`;
   return t;
+}
+
+function pistaLetter(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").trim();
+  if (!t) return null;
+  const direct = t.match(/^([ABC])$/i)?.[1];
+  if (direct) return direct.toUpperCase();
+  const normalized = normalizePistaName(t);
+  const fromName = normalized?.match(/^pista\s+([ABC])$/i)?.[1];
+  return fromName ? fromName.toUpperCase() : null;
+}
+
+/** Usa el nombre exacto de una pista creada en admin (selector). */
+export function resolvePistaNombre(
+  raw: string | null | undefined,
+  catalog: { nombre: string }[],
+): { nombre: string | null; warning?: string } {
+  const t = (raw ?? "").trim();
+  if (!t) return { nombre: null };
+
+  const names = catalog.map((c) => c.nombre.trim()).filter(Boolean);
+  const fallback = normalizePistaName(t) ?? t;
+
+  if (!names.length) {
+    return { nombre: fallback, warning: "Crea las pistas A, B y C en admin antes de importar." };
+  }
+
+  const tryMatch = (label: string) =>
+    names.find((n) => normalizePistaLabel(n) === normalizePistaLabel(label));
+
+  const exactNormalized = tryMatch(fallback);
+  if (exactNormalized) return { nombre: exactNormalized };
+
+  const exactRaw = tryMatch(t);
+  if (exactRaw) return { nombre: exactRaw };
+
+  const letter = pistaLetter(t);
+  if (letter) {
+    const letterMatches = names.filter((n) => {
+      const label = normalizePistaLabel(n);
+      return (
+        label === letter.toLowerCase() ||
+        label === `pista ${letter.toLowerCase()}` ||
+        label.endsWith(` ${letter.toLowerCase()}`)
+      );
+    });
+    if (letterMatches.length === 1) return { nombre: letterMatches[0] };
+    if (letterMatches.length > 1) {
+      return { nombre: letterMatches[0], warning: `Varias pistas para la letra ${letter}` };
+    }
+  }
+
+  return {
+    nombre: fallback,
+    warning: `Pista "${t}" no coincide con las creadas (${names.join(", ")}). Créala o renómbrala.`,
+  };
 }
 
 function splitTeams(part: string): { local: string; visit: string } | null {
