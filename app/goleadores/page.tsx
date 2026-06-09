@@ -2,18 +2,30 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { jugadorNombreYAlias } from "@/lib/jugador-display";
+import { partesJugadorDisplay, type JugadorNombre } from "@/lib/jugador-display";
 
 type GolRow = {
   jugador_id: string | null;
   propia_meta?: boolean | null;
-  jugadores: { nombre: string; apellidos: string; alias: string | null } | null;
-  equipos: { nombre: string } | null;
+  equipos: { nombre: string } | { nombre: string }[] | null;
 };
+
+type RankingRow = {
+  nombreCompleto: string;
+  alias: string | null;
+  equipo: string;
+  goles: number;
+};
+
+function equipoNombre(e: GolRow["equipos"]): string {
+  if (!e) return "—";
+  if (Array.isArray(e)) return e[0]?.nombre ?? "—";
+  return e.nombre ?? "—";
+}
 
 export default function GoleadoresPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [ranking, setRanking] = useState<{ nombre: string; equipo: string; goles: number }[]>([]);
+  const [ranking, setRanking] = useState<RankingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -21,7 +33,7 @@ export default function GoleadoresPage() {
     async function load() {
       const { data, error } = await supabase
         .from("goles")
-        .select("jugador_id,propia_meta,jugadores(nombre,apellidos,alias),equipos(nombre)")
+        .select("jugador_id,propia_meta,equipos(nombre)")
         .not("jugador_id", "is", null)
         .not("propia_meta", "eq", true);
 
@@ -32,19 +44,43 @@ export default function GoleadoresPage() {
         return;
       }
 
-      const conteo: Record<string, { nombre: string; equipo: string; goles: number }> = {};
-      for (const row of (data as GolRow[]) ?? []) {
+      const rows = (data as GolRow[]) ?? [];
+      const jugadorIds = [...new Set(rows.map((r) => r.jugador_id).filter(Boolean))] as string[];
+
+      const jugadorMap = new Map<string, JugadorNombre>();
+      if (jugadorIds.length > 0) {
+        const { data: jugadoresData, error: jugadoresError } = await supabase
+          .from("jugadores")
+          .select("id,nombre,apellidos,alias")
+          .in("id", jugadorIds);
+
+        if (jugadoresError) {
+          setMessage(`Error cargando jugadores: ${jugadoresError.message}`);
+          setRanking([]);
+          setLoading(false);
+          return;
+        }
+
+        for (const j of (jugadoresData as (JugadorNombre & { id: string })[]) ?? []) {
+          jugadorMap.set(j.id, j);
+        }
+      }
+
+      const conteo: Record<string, RankingRow> = {};
+      for (const row of rows) {
         const jid = row.jugador_id;
         if (!jid || row.propia_meta) continue;
-        const nombreJ = jugadorNombreYAlias(row.jugadores);
-        const equipoN = row.equipos?.nombre ?? "—";
+        const { nombreCompleto, alias } = partesJugadorDisplay(jugadorMap.get(jid) ?? null);
+        const equipoN = equipoNombre(row.equipos);
         if (!conteo[jid]) {
-          conteo[jid] = { nombre: nombreJ, equipo: equipoN, goles: 0 };
+          conteo[jid] = { nombreCompleto, alias, equipo: equipoN, goles: 0 };
         }
         conteo[jid].goles += 1;
       }
 
-      const lista = Object.values(conteo).sort((a, b) => b.goles - a.goles || a.nombre.localeCompare(b.nombre, "es"));
+      const lista = Object.values(conteo).sort(
+        (a, b) => b.goles - a.goles || a.nombreCompleto.localeCompare(b.nombreCompleto, "es"),
+      );
       setRanking(lista);
       setLoading(false);
     }
@@ -71,15 +107,20 @@ export default function GoleadoresPage() {
         <ol className="mt-2 grid gap-2">
           {ranking.map((r, i) => (
             <li
-              key={`${r.nombre}-${i}`}
-              className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3"
+              key={`${r.nombreCompleto}-${r.alias ?? ""}-${i}`}
+              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3"
             >
-              <span className="font-medium text-slate-900">
-                <span className="mr-2 text-violet-600">{i + 1}.</span>
-                {r.nombre}
-                <span className="ml-2 text-sm font-normal text-slate-600">({r.equipo})</span>
-              </span>
-              <span className="rounded-full bg-violet-100 px-3 py-1 text-sm font-semibold text-violet-800">
+              <div className="min-w-0">
+                <p className="font-medium text-slate-900">
+                  <span className="mr-2 text-violet-600">{i + 1}.</span>
+                  {r.nombreCompleto}
+                </p>
+                {r.alias ? (
+                  <p className="mt-0.5 text-sm font-semibold text-violet-600">{r.alias}</p>
+                ) : null}
+                <p className="mt-0.5 text-sm text-slate-600">{r.equipo}</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-violet-100 px-3 py-1 text-sm font-semibold text-violet-800">
                 {r.goles}
               </span>
             </li>

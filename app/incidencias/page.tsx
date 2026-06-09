@@ -2,17 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { jugadorNombreYAlias } from "@/lib/jugador-display";
+import { partesJugadorDisplay, type JugadorNombre } from "@/lib/jugador-display";
 
 type TarjetaRow = {
   jugador_id: string | null;
   tipo: string;
-  jugadores: { nombre: string; apellidos: string; alias: string | null } | null;
-  equipos: { nombre: string } | null;
+  equipos: { nombre: string } | { nombre: string }[] | null;
 };
 
 type RankingRow = {
-  nombre: string;
+  nombreCompleto: string;
+  alias: string | null;
   equipo: string;
   puntos: number;
   amarillas: number;
@@ -27,6 +27,12 @@ function labelTarjeta(tipo: string) {
   return tipo;
 }
 
+function equipoNombre(e: TarjetaRow["equipos"]): string {
+  if (!e) return "—";
+  if (Array.isArray(e)) return e[0]?.nombre ?? "—";
+  return e.nombre ?? "—";
+}
+
 export default function IncidenciasPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [ranking, setRanking] = useState<RankingRow[]>([]);
@@ -36,11 +42,12 @@ export default function IncidenciasPage() {
   useEffect(() => {
     async function load() {
       const [{ data: cfgData }, { data, error }] = await Promise.all([
-        supabase.from("configuracion_torneo").select("fairplay_falta_pts,fairplay_amarilla_pts,fairplay_roja_pts,fairplay_roja_agresion_pts").limit(1).maybeSingle(),
         supabase
-          .from("tarjetas_partido")
-          .select("jugador_id,tipo,jugadores(nombre,apellidos,alias),equipos(nombre)")
-          .not("jugador_id", "is", null),
+          .from("configuracion_torneo")
+          .select("fairplay_falta_pts,fairplay_amarilla_pts,fairplay_roja_pts,fairplay_roja_agresion_pts")
+          .limit(1)
+          .maybeSingle(),
+        supabase.from("tarjetas_partido").select("jugador_id,tipo,equipos(nombre)").not("jugador_id", "is", null),
       ]);
 
       if (error) {
@@ -55,18 +62,37 @@ export default function IncidenciasPage() {
       const ptsRoja = Number(cfg?.fairplay_roja_pts ?? 5);
       const ptsRojaAg = Number(cfg?.fairplay_roja_agresion_pts ?? 10);
 
-      const conteo: Record<
-        string,
-        { nombre: string; equipo: string; puntos: number; amarillas: number; rojas: number }
-      > = {};
+      const rows = (data as TarjetaRow[]) ?? [];
+      const jugadorIds = [...new Set(rows.map((r) => r.jugador_id).filter(Boolean))] as string[];
 
-      for (const row of (data as TarjetaRow[]) ?? []) {
+      const jugadorMap = new Map<string, JugadorNombre>();
+      if (jugadorIds.length > 0) {
+        const { data: jugadoresData, error: jugadoresError } = await supabase
+          .from("jugadores")
+          .select("id,nombre,apellidos,alias")
+          .in("id", jugadorIds);
+
+        if (jugadoresError) {
+          setMessage(`Error cargando jugadores: ${jugadoresError.message}`);
+          setRanking([]);
+          setLoading(false);
+          return;
+        }
+
+        for (const j of (jugadoresData as (JugadorNombre & { id: string })[]) ?? []) {
+          jugadorMap.set(j.id, j);
+        }
+      }
+
+      const conteo: Record<string, RankingRow> = {};
+
+      for (const row of rows) {
         const jid = row.jugador_id;
         if (!jid) continue;
-        const nombreJ = jugadorNombreYAlias(row.jugadores);
-        const equipoN = row.equipos?.nombre ?? "—";
+        const { nombreCompleto, alias } = partesJugadorDisplay(jugadorMap.get(jid) ?? null);
+        const equipoN = equipoNombre(row.equipos);
         if (!conteo[jid]) {
-          conteo[jid] = { nombre: nombreJ, equipo: equipoN, puntos: 0, amarillas: 0, rojas: 0 };
+          conteo[jid] = { nombreCompleto, alias, equipo: equipoN, puntos: 0, amarillas: 0, rojas: 0 };
         }
 
         const tipo = row.tipo;
@@ -86,7 +112,9 @@ export default function IncidenciasPage() {
         }
       }
 
-      const lista = Object.values(conteo).sort((a, b) => b.puntos - a.puntos || a.nombre.localeCompare(b.nombre, "es"));
+      const lista = Object.values(conteo).sort(
+        (a, b) => b.puntos - a.puntos || a.nombreCompleto.localeCompare(b.nombreCompleto, "es"),
+      );
       setRanking(lista);
       setLoading(false);
     }
@@ -115,14 +143,17 @@ export default function IncidenciasPage() {
         <ol className="mt-2 grid gap-2">
           {ranking.map((r, i) => (
             <li
-              key={`${r.nombre}-${i}`}
+              key={`${r.nombreCompleto}-${r.alias ?? ""}-${i}`}
               className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3"
             >
               <div className="min-w-0">
                 <p className="font-medium text-slate-900">
                   <span className="mr-2 text-violet-600">{i + 1}.</span>
-                  {r.nombre}
+                  {r.nombreCompleto}
                 </p>
+                {r.alias ? (
+                  <p className="mt-0.5 text-sm font-semibold text-violet-600">{r.alias}</p>
+                ) : null}
                 <p className="mt-0.5 text-sm text-slate-600">{r.equipo}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   {r.amarillas > 0 ? `${r.amarillas} amarilla(s)` : null}
