@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { jugadorNombreYAlias, partesJugadorDisplay, unwrapJugadorJoin } from "@/lib/jugador-display";
 
 type Partido = {
   id: string;
@@ -61,9 +62,17 @@ type GoalModalState = {
 };
 
 function nombreJugador(j: JugadorLite | JugadorJoin) {
-  if (!j) return "—";
-  if ("alias" in j && j.alias?.trim()) return j.alias.trim();
-  return `${j.nombre} ${j.apellidos}`.trim();
+  return jugadorNombreYAlias(unwrapJugadorJoin(j));
+}
+
+function JugadorNombreAliasBlock({ j }: { j: JugadorLite | JugadorJoin }) {
+  const { nombreCompleto, alias } = partesJugadorDisplay(unwrapJugadorJoin(j));
+  return (
+    <span className="text-left">
+      <span className="block font-semibold text-slate-900">{nombreCompleto}</span>
+      {alias ? <span className="block text-[11px] font-semibold text-violet-600">{alias}</span> : null}
+    </span>
+  );
 }
 
 function labelTarjeta(tipo: string) {
@@ -168,6 +177,8 @@ export default function AdminDirectoPage() {
   const [goalModo, setGoalModo] = useState<"normal" | "pp">("normal");
   const [goalJugadorId, setGoalJugadorId] = useState<string>("");
   const [goalMinuto, setGoalMinuto] = useState<string>("");
+  const [savingGoal, setSavingGoal] = useState(false);
+  const savingGoalRef = useRef(false);
   const [dcEmail, setDcEmail] = useState("");
   const [dcNombre, setDcNombre] = useState("");
   const [dcApellidos, setDcApellidos] = useState("");
@@ -482,7 +493,7 @@ export default function AdminDirectoPage() {
   }
 
   async function submitGoalModal() {
-    if (!goalModal || !goalJugadorId) return;
+    if (!goalModal || !goalJugadorId || savingGoalRef.current) return;
     const lid = goalModal.equipoLocalId;
     const vid = goalModal.equipoVisitId;
     const scoringTeamId = goalModal.beneficiario === "local" ? lid : vid;
@@ -509,15 +520,22 @@ export default function AdminDirectoPage() {
     }
 
     const mn = goalMinuto.trim();
-    const ok = await postDirecto({
-      action: "add_goal",
-      partido_id: goalModal.partidoId,
-      jugador_id: j.id,
-      equipo_id: j.equipo_id,
-      propia_meta,
-      minuto: mn === "" ? null : Number(mn),
-    });
-    if (ok) setGoalModal(null);
+    savingGoalRef.current = true;
+    setSavingGoal(true);
+    try {
+      const ok = await postDirecto({
+        action: "add_goal",
+        partido_id: goalModal.partidoId,
+        jugador_id: j.id,
+        equipo_id: j.equipo_id,
+        propia_meta,
+        minuto: mn === "" ? null : Number(mn),
+      });
+      if (ok) setGoalModal(null);
+    } finally {
+      savingGoalRef.current = false;
+      setSavingGoal(false);
+    }
   }
 
   function n(id: string | null) {
@@ -533,7 +551,7 @@ export default function AdminDirectoPage() {
       >
         <span className="flex items-center gap-2 font-medium text-slate-800">
           {avatarFrom({ nombre: j.nombre, apellidos: j.apellidos, alias: j.alias, foto_url: j.foto_url }, nombreJugador(j))}
-          {nombreJugador(j)}
+          <JugadorNombreAliasBlock j={j} />
         </span>
         {editable ? (
           <span className="flex flex-wrap gap-1">
@@ -950,7 +968,7 @@ export default function AdminDirectoPage() {
                                       <div className="flex items-center gap-2 justify-self-start">
                                         {avatarFrom(ev.g.jugadores, nombreJugador(ev.g.jugadores))}
                                         <span className="text-left">
-                                          <span className="font-semibold text-slate-900">{nombreJugador(ev.g.jugadores)}</span>
+                                          <JugadorNombreAliasBlock j={ev.g.jugadores} />
                                           <span className="ml-1 inline-block align-middle text-base leading-none text-slate-800" aria-hidden>
                                             ⚽
                                           </span>
@@ -966,7 +984,7 @@ export default function AdminDirectoPage() {
                                     {!ev.alignLeft ? (
                                       <div className="flex items-center gap-2 justify-self-end">
                                         <span className="text-right">
-                                          <span className="font-semibold text-slate-900">{nombreJugador(ev.g.jugadores)}</span>
+                                          <JugadorNombreAliasBlock j={ev.g.jugadores} />
                                           <span className="ml-1 inline-block align-middle text-base leading-none text-slate-800" aria-hidden>
                                             ⚽
                                           </span>
@@ -1005,7 +1023,7 @@ export default function AdminDirectoPage() {
                                       <div className="flex items-center gap-2 justify-self-start">
                                         {avatarFrom(ev.t.jugadores, nombreJugador(ev.t.jugadores))}
                                         <span className="text-left">
-                                          <span className="font-semibold text-slate-900">{nombreJugador(ev.t.jugadores)}</span>
+                                          <JugadorNombreAliasBlock j={ev.t.jugadores} />
                                           <span className="ml-2 inline-flex align-middle gap-1">{cardGlyph(ev.t.tipo)}</span>
                                           <span className="ml-2 text-xs font-medium text-slate-700">{labelTarjeta(ev.t.tipo)}</span>
                                         </span>
@@ -1017,7 +1035,7 @@ export default function AdminDirectoPage() {
                                     {!ev.alignLeft ? (
                                       <div className="flex items-center gap-2 justify-self-end">
                                         <span className="text-right">
-                                          <span className="font-semibold text-slate-900">{nombreJugador(ev.t.jugadores)}</span>
+                                          <JugadorNombreAliasBlock j={ev.t.jugadores} />
                                           <span className="ml-2 inline-flex align-middle gap-1">{cardGlyph(ev.t.tipo)}</span>
                                           <span className="ml-2 text-xs font-medium text-slate-700">{labelTarjeta(ev.t.tipo)}</span>
                                         </span>
@@ -1143,10 +1161,11 @@ export default function AdminDirectoPage() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white"
-              onClick={() => void submitGoalModal()}
+                  disabled={savingGoal || !goalJugadorId}
+                  className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => void submitGoalModal()}
                 >
-                  Guardar gol
+                  {savingGoal ? "Guardando…" : "Guardar gol"}
                 </button>
               </div>
             </div>

@@ -163,10 +163,10 @@ function qualificationColor(q: string | null) {
 
 const STICKY_POS =
   "relative sticky left-0 z-20 w-10 min-w-[2.5rem] bg-inherit px-3 py-2 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-slate-200/80";
-const STICKY_PTS =
-  "relative sticky left-10 z-20 w-12 min-w-[3rem] bg-inherit px-3 py-2 text-center font-bold after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-slate-200/80";
 const STICKY_EQUIPO =
-  "relative sticky left-[5.5rem] z-20 min-w-[8.5rem] max-w-[11rem] bg-inherit px-3 py-2 font-semibold text-slate-900 shadow-[4px_0_8px_-2px_rgba(15,23,42,0.12)] sm:max-w-none";
+  "relative sticky left-10 z-20 w-36 min-w-[9rem] bg-inherit px-3 py-2 font-semibold text-slate-900 after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-slate-200/80";
+const STICKY_PTS =
+  "relative sticky left-[11.5rem] z-20 w-12 min-w-[3rem] bg-inherit px-3 py-2 text-center font-bold text-violet-800 shadow-[4px_0_8px_-2px_rgba(15,23,42,0.12)]";
 const STICKY_HEAD = "bg-slate-50";
 
 function compOrderKey(name: string) {
@@ -881,8 +881,8 @@ export default function ClasificacionesPage() {
                       <thead className="text-slate-700">
                         <tr>
                           <th className={`${STICKY_POS} ${STICKY_HEAD} text-left`}>#</th>
-                          <th className={`${STICKY_PTS} ${STICKY_HEAD}`}>PTS</th>
                           <th className={`${STICKY_EQUIPO} ${STICKY_HEAD} text-left`}>Equipo</th>
+                          <th className={`${STICKY_PTS} ${STICKY_HEAD}`}>PTS</th>
                           <th className={`${STICKY_HEAD} px-3 py-2`}>PJ</th>
                           <th className={`${STICKY_HEAD} px-3 py-2`}>PG</th>
                           <th className={`${STICKY_HEAD} px-3 py-2`}>PE</th>
@@ -899,8 +899,8 @@ export default function ClasificacionesPage() {
                           return (
                             <tr key={r.id} className={`border-t border-slate-100 ${rowBg}`}>
                               <td className={`${STICKY_POS} font-medium text-slate-600`}>{r.posGrupo}</td>
-                              <td className={`${STICKY_PTS} text-violet-800`}>{r.pts}</td>
                               <td className={`${STICKY_EQUIPO} truncate sm:whitespace-normal`}>{r.nombre}</td>
+                              <td className={STICKY_PTS}>{r.pts}</td>
                               <td className="px-3 py-2 text-center">{r.pj}</td>
                               <td className="px-3 py-2 text-center">{r.pg}</td>
                               <td className="px-3 py-2 text-center">{r.pe}</td>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { partesJugadorDisplay, type JugadorNombre } from "@/lib/jugador-display";
 
 type Partido = {
   id: string;
@@ -22,7 +23,6 @@ type GolRow = {
   jugador_id: string | null;
   equipo_id: string | null;
   propia_meta?: boolean | null;
-  jugadores: { nombre: string; apellidos: string; foto_url?: string | null } | null;
 };
 
 function JugadorGoalAvatar(props: {
@@ -56,7 +56,9 @@ export default function ResultadoDetallePage() {
   const [partido, setPartido] = useState<Partido | null>(null);
   const [localNombre, setLocalNombre] = useState("");
   const [visitNombre, setVisitNombre] = useState("");
-  const [goles, setGoles] = useState<GolRow[]>([]);
+  const [goles, setGoles] = useState<
+    (GolRow & { nombreCompleto: string; alias: string | null; fotoUrl: string | null })[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -98,7 +100,7 @@ export default function ResultadoDetallePage() {
 
       const { data: gData, error: gErr } = await supabase
         .from("goles")
-        .select("id,minuto,jugador_id,equipo_id,propia_meta,jugadores(nombre,apellidos,foto_url)")
+        .select("id,minuto,jugador_id,equipo_id,propia_meta")
         .eq("partido_id", partidoId)
         .order("minuto", { ascending: true, nullsFirst: true })
         .order("created_at", { ascending: true });
@@ -107,7 +109,33 @@ export default function ResultadoDetallePage() {
         if (!silent) setMessage(`Error cargando goles: ${gErr.message}`);
         setGoles([]);
       } else {
-        setGoles((gData as GolRow[]) ?? []);
+        const rows = (gData as GolRow[]) ?? [];
+        const jugadorIds = [...new Set(rows.map((r) => r.jugador_id).filter(Boolean))] as string[];
+        const jugadorMap = new Map<string, JugadorNombre & { foto_url?: string | null }>();
+
+        if (jugadorIds.length > 0) {
+          const { data: jugadoresData } = await supabase
+            .from("jugadores")
+            .select("id,nombre,apellidos,alias,foto_url")
+            .in("id", jugadorIds);
+
+          for (const j of (jugadoresData as (JugadorNombre & { id: string; foto_url?: string | null })[]) ?? []) {
+            jugadorMap.set(j.id, j);
+          }
+        }
+
+        setGoles(
+          rows.map((g) => {
+            const j = g.jugador_id ? jugadorMap.get(g.jugador_id) : null;
+            const { nombreCompleto, alias } = partesJugadorDisplay(j);
+            return {
+              ...g,
+              nombreCompleto,
+              alias,
+              fotoUrl: j?.foto_url ?? null,
+            };
+          }),
+        );
       }
       if (!silent) setLoading(false);
     },
@@ -168,26 +196,20 @@ export default function ResultadoDetallePage() {
                     key={g.id}
                     className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800"
                   >
-                    <JugadorGoalAvatar
-                      fotoUrl={g.jugadores?.foto_url}
-                      nombreCompleto={
-                        g.jugadores ? `${g.jugadores.nombre} ${g.jugadores.apellidos}` : "?"
-                      }
-                    />
+                    <JugadorGoalAvatar fotoUrl={g.fotoUrl} nombreCompleto={g.nombreCompleto} />
                     <div className="min-w-0 flex-1">
-                      <span className="font-medium">
-                        {g.jugadores
-                          ? `${g.jugadores.nombre} ${g.jugadores.apellidos}`
-                          : "Jugador desconocido"}
+                      <span className="block font-medium">{g.nombreCompleto}</span>
+                      {g.alias ? (
+                        <span className="mt-0.5 block text-sm font-semibold text-violet-600">{g.alias}</span>
+                      ) : null}
+                      <span className="mt-0.5 block text-sm text-slate-600">
+                        {g.minuto != null ? `Min ${g.minuto}` : "Min —"}
+                        {g.propia_meta ? (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">
+                            Propia puerta
+                          </span>
+                        ) : null}
                       </span>
-                      {g.minuto != null ? (
-                        <span className="ml-2 text-sm text-slate-600">min {g.minuto}</span>
-                      ) : null}
-                      {g.propia_meta ? (
-                        <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">
-                          Propia puerta
-                        </span>
-                      ) : null}
                     </div>
                   </li>
                 ))}
