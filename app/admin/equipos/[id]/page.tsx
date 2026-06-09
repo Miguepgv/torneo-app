@@ -367,11 +367,27 @@ export default function AdminEquipoDetallePage() {
 
   async function onBorrarJugador(jugadorId: string) {
     const ok = window.confirm("Quieres borrar este jugador?");
-    if (!ok) return;
+    if (!ok || !equipo) return;
 
-    const { error } = await supabase.from("jugadores").delete().eq("id", jugadorId);
-    if (error) {
-      setMessage(`Error borrando jugador: ${error.message}`);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      setMessage("Sesion caducada. Vuelve a iniciar sesion.");
+      return;
+    }
+
+    const res = await fetch("/api/admin/delete-jugador", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ equipoId: equipo.id, jugadorId }),
+    });
+    const json = (await res.json()) as { error?: string };
+    if (!res.ok) {
+      setMessage(`Error borrando jugador: ${json.error ?? "desconocido"}`);
       return;
     }
     setMessage("Jugador borrado.");

@@ -57,8 +57,10 @@ export default function AdminCalendarioPage() {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [newPista, setNewPista] = useState("");
   const [partidos, setPartidos] = useState<Partido[]>([]);
-  const [tab, setTab] = useState<"calendario" | "cruces">("calendario");
+  const [tab, setTab] = useState<"calendario" | "cruces" | "horarios">("calendario");
   const [msg, setMsg] = useState("");
+  const [scheduleText, setScheduleText] = useState("");
+  const [scheduleYear, setScheduleYear] = useState(String(new Date().getFullYear()));
   const [startDm, setStartDm] = useState("");
   const [startHm, setStartHm] = useState("18:00");
   const [intervalMinutes, setIntervalMinutes] = useState(60);
@@ -189,6 +191,32 @@ export default function AdminCalendarioPage() {
       await load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Error generando cruces.");
+    }
+  }
+
+  async function onApplySchedule() {
+    if (!scheduleText.trim()) {
+      setMsg("Pega las lineas del horario.");
+      return;
+    }
+    try {
+      setMsg("Aplicando horarios...");
+      const r = (await api({
+        action: "apply_schedule",
+        text: scheduleText,
+        year: Number(scheduleYear) || new Date().getFullYear(),
+      })) as {
+        updated?: number;
+        skipped?: string[];
+        errors?: string[];
+      };
+      const parts = [`Actualizados: ${r.updated ?? 0} partidos.`];
+      if (r.skipped?.length) parts.push(`Omitidos: ${r.skipped.slice(0, 5).join(" · ")}${(r.skipped.length ?? 0) > 5 ? "…" : ""}`);
+      if (r.errors?.length) parts.push(`Errores: ${r.errors.slice(0, 3).join(" · ")}`);
+      setMsg(parts.join("\n"));
+      await load();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Error aplicando horarios.");
     }
   }
 
@@ -409,6 +437,9 @@ export default function AdminCalendarioPage() {
           <button className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold sm:px-3 sm:py-2 sm:text-sm ${tab === "cruces" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("cruces")} type="button">
             Generar cruces
           </button>
+          <button className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold sm:px-3 sm:py-2 sm:text-sm ${tab === "horarios" ? "bg-violet-600 text-white" : "border border-violet-300 text-violet-700"}`} onClick={() => setTab("horarios")} type="button">
+            Importar horarios
+          </button>
         </div>
 
         <form className="rounded-xl border border-slate-200 p-4" onSubmit={onAddPista}>
@@ -560,7 +591,44 @@ export default function AdminCalendarioPage() {
         </div>
         ) : null}
 
-        {tab === "calendario" ? (
+        {tab === "horarios" ? (
+          <div className="rounded-xl border border-slate-200 p-4">
+            <p className="mb-2 font-semibold">Importar fecha y hora de partidos</p>
+            <p className="mb-3 text-sm text-slate-600">
+              Pega una linea por partido. Los nombres deben coincidir con los equipos en la app.
+              Despues puedes corregir cualquier partido a mano en la lista de abajo.
+            </p>
+            <p className="mb-2 rounded-lg bg-violet-50 p-2 font-mono text-xs text-violet-950">
+              Equipo Local vs Equipo Visitante | 27/05 18:00 | Pista 1
+            </p>
+            <div className="mb-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <input
+                className="rounded-lg border border-slate-300 p-2 text-sm"
+                type="number"
+                min={2024}
+                max={2030}
+                value={scheduleYear}
+                onChange={(e) => setScheduleYear(e.target.value)}
+                placeholder="Ano (ej. 2026)"
+              />
+              <button
+                className="rounded-lg bg-violet-600 px-4 py-2 font-semibold text-white"
+                type="button"
+                onClick={() => void onApplySchedule()}
+              >
+                Aplicar horarios
+              </button>
+            </div>
+            <textarea
+              className="min-h-[180px] w-full rounded-lg border border-slate-300 p-3 font-mono text-sm"
+              value={scheduleText}
+              onChange={(e) => setScheduleText(e.target.value)}
+              placeholder={"Los Cofrades vs La Peña | 06/06 10:00 | Pista 1\nOtro Equipo vs Otro Mas | 06/06 11:00 | Pista 2"}
+            />
+          </div>
+        ) : null}
+
+        {tab === "calendario" || tab === "horarios" ? (
           <div className="rounded-xl border border-slate-200 p-4">
             <p className="mb-2 font-semibold">Partidos de grupos</p>
             <div className="grid gap-2">

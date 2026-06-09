@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { TORNEO_COMPETICIONES, TORNEO_COMPETICION_KO_GENERICA } from "@/lib/torneo-constants";
+import {
+  findTeamIdByName,
+  parseScheduleText,
+  toIsoFromParts,
+} from "@/lib/server/parse-schedule-lines";
 
 type MatchPayload = {
   id?: string;
@@ -44,7 +49,8 @@ type Body =
     }
   | { action: "add_pista"; nombre?: string }
   | { action: "delete_pista"; id?: string }
-  | { action: "set_estado"; id?: string; estado?: string };
+  | { action: "set_estado"; id?: string; estado?: string }
+  | { action: "apply_schedule"; text?: string; year?: number };
 
 async function ensureStaff(request: NextRequest) {
   const token = (request.headers.get("authorization") ?? "").replace("Bearer ", "");
@@ -441,6 +447,90 @@ export async function POST(request: NextRequest) {
     const up = await admin.from("partidos").update({ estado }).eq("id", body.id);
     if (up.error) return NextResponse.json({ error: up.error.message }, { status: 400 });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "apply_schedule") {
+    const text = (body.text ?? "").trim();
+    if (!text) return NextResponse.json({ error: "Pega el horario en el cuadro de texto." }, { status: 400 });
+    const year = Number(body.year) || new Date().getFullYear();
+
+    const [{ data: equipos, error: eErr }, { data: partidos, error: pErr }] = await Promise.all([
+      admin.from("equipos").select("id,nombre"),
+      admin
+        .from("partidos")
+        .select("id,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante,fase"),
+    ]);
+    if (eErr) return NextResponse.json({ error: eErr.message }, { status: 400 });
+    if (pErr) return NextResponse.json({ error: pErr.message }, { status: 400 });
+
+    const teamList = (equipos ?? []) as { id: string; nombre: string }[];
+    const parsed = parseScheduleText(text, year);
+
+    let updated = 0;
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    for (const row of parsed) {
+      if (!row.ok) {
+        if (row.raw) errors.push(`${row.raw}: ${row.reason}`);
+        continue;
+      }
+
+      const localId = findTeamIdByName(teamList, row.line.localName);
+      const visitId = findTeamIdByName(teamList, row.line.visitName);
+      if (!localId || !visitId) {
+        skipped.push(
+          `${row.line.localName} vs ${row.line.visitName}: equipo no encontrado (revisa nombres)`,
+        );
+        continue;
+      }
+
+      const candidates = ((partidos ?? []) as {
+        id: string;
+        equipo_local_id: string | null;
+        equipo_visitante_id: string | null;
+        slot_local?: string | null;
+        slot_visitante?: string | null;
+      }[]).filter((p) => {
+        const direct =
+          p.equipo_local_id === localId && p.equipo_visitante_id === visitId;
+        const reverse =
+          p.equipo_local_id === visitId && p.equipo_visitante_id === localId;
+        return direct || reverse;
+      });
+
+      if (candidates.length !== 1) {
+        skipped.push(
+          `${row.line.localName} vs ${row.line.visitName}: ${candidates.length === 0 ? "partido no encontrado" : "varios partidos coinciden"}`,
+        );
+        continue;
+      }
+
+      const fechaIso = toIsoFromParts(
+        row.line.day,
+        row.line.month,
+        row.line.hour,
+        row.line.minute,
+        year,
+      );
+      const patch: Record<string, unknown> = { fecha_hora: fechaIso };
+      if (row.line.pista) patch.pista = row.line.pista;
+
+      const up = await admin.from("partidos").update(patch).eq("id", candidates[0].id);
+      if (up.error) {
+        errors.push(`${row.raw}: ${up.error.message}`);
+        continue;
+      }
+      updated += 1;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      updated,
+      skipped,
+      errors,
+      parsed: parsed.filter((r) => r.ok).length,
+    });
   }
 
   return NextResponse.json({ error: "Accion no soportada." }, { status: 400 });
