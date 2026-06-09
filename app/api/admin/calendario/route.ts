@@ -618,6 +618,8 @@ export async function POST(request: NextRequest) {
     }
 
     const parsed = parseScheduleText(text, year, weekend);
+
+    for (const row of parsed) {
       if (!row.ok) {
         if (row.raw) errors.push(`${row.raw}: ${row.reason}`);
         continue;
