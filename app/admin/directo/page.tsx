@@ -158,6 +158,53 @@ function partidoSortFinalizados(a: Partido, b: Partido) {
   return tb - ta;
 }
 
+type PartidoLiveData = {
+  partido: Partido;
+  extras: LivePartidoExtras;
+  jugadoresLocal: JugadorLite[];
+  jugadoresVisitante: JugadorLite[];
+  goles: GolLite[];
+  tarjetas: TarjLite[];
+  loading: boolean;
+  loadError?: string;
+};
+
+function buildTimeline(partido: Partido, goles: GolLite[], tarjetas: TarjLite[]) {
+  if (!partido.equipo_local_id || !partido.equipo_visitante_id) return [];
+  const lid = partido.equipo_local_id;
+  type Row =
+    | { k: "gol"; id: string; sk: number; g: GolLite }
+    | { k: "tarjeta"; id: string; sk: number; t: TarjLite };
+  const rows: Row[] = [];
+  for (const g of goles) {
+    rows.push({ k: "gol", id: `g-${g.id}`, sk: eventSortKey(g.created_at, g.minuto, g.id), g });
+  }
+  for (const t of tarjetas) {
+    rows.push({ k: "tarjeta", id: `t-${t.id}`, sk: eventSortKey(t.created_at, null, t.id), t });
+  }
+  rows.sort((a, b) => a.sk - b.sk || a.id.localeCompare(b.id));
+  return rows.map((row) => {
+    if (row.k === "gol") {
+      const g = row.g;
+      const authorIsLocal = g.equipo_id === lid;
+      const alignLeft = g.propia_meta ? !authorIsLocal : authorIsLocal;
+      return { ...row, alignLeft, label: minutoLabel(g.minuto, g.created_at) };
+    }
+    const t = row.t;
+    const alignLeft = t.equipo_id === lid;
+    return { ...row, alignLeft, label: minutoLabel(null, t.created_at) };
+  });
+}
+
+function mergePartidoFromLive(row: Partido, live: Partido): Partido {
+  return {
+    ...row,
+    estado: live.estado ?? row.estado,
+    goles_local: live.goles_local ?? row.goles_local,
+    goles_visitante: live.goles_visitante ?? row.goles_visitante,
+  };
+}
+
 export default function AdminDirectoPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [rol, setRol] = useState<string | null>(null);
@@ -165,14 +212,8 @@ export default function AdminDirectoPage() {
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [equipos, setEquipos] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [liveLoading, setLiveLoading] = useState(false);
-  const [livePartido, setLivePartido] = useState<Partido | null>(null);
-  const [liveExtras, setLiveExtras] = useState<LivePartidoExtras>(null);
-  const [jugadoresLocal, setJugadoresLocal] = useState<JugadorLite[]>([]);
-  const [jugadoresVisitante, setJugadoresVisitante] = useState<JugadorLite[]>([]);
-  const [goles, setGoles] = useState<GolLite[]>([]);
-  const [tarjetas, setTarjetas] = useState<TarjLite[]>([]);
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [liveById, setLiveById] = useState<Record<string, PartidoLiveData>>({});
   const [goalModal, setGoalModal] = useState<GoalModalState | null>(null);
   const [goalModo, setGoalModo] = useState<"normal" | "pp">("normal");
   const [goalJugadorId, setGoalJugadorId] = useState<string>("");
@@ -188,10 +229,14 @@ export default function AdminDirectoPage() {
   const [dcLoading, setDcLoading] = useState(false);
   const [directoTab, setDirectoTab] = useState<"activos" | "finalizados">("activos");
 
-  const expandedIdRef = useRef<string | null>(null);
+  const expandedIdsRef = useRef<string[]>([]);
   useEffect(() => {
-    expandedIdRef.current = expandedId;
-  }, [expandedId]);
+    expandedIdsRef.current = expandedIds;
+  }, [expandedIds]);
+
+  const goalModalLive = goalModal ? liveById[goalModal.partidoId] : undefined;
+  const goalJugadoresLocal = goalModalLive?.jugadoresLocal ?? [];
+  const goalJugadoresVisitante = goalModalLive?.jugadoresVisitante ?? [];
 
   const getToken = useCallback(async () => {
     const { data } = await supabase.auth.getSession();
@@ -217,6 +262,7 @@ export default function AdminDirectoPage() {
   }
 
   useEffect(() => {
+    let pollId: number | undefined;
     async function loadRoleAndData() {
       const {
         data: { user },
@@ -232,35 +278,77 @@ export default function AdminDirectoPage() {
       setCheckingRole(false);
       if (r === "admin" || r === "director_campo") {
         await load();
+        pollId = window.setInterval(() => void load(), 15000);
       }
     }
     void loadRoleAndData();
+    return () => {
+      if (pollId) window.clearInterval(pollId);
+    };
   }, [supabase]);
 
   const fetchLiveDetail = useCallback(
     async (partidoId: string) => {
-      setLiveLoading(true);
-      setLivePartido(null);
-      setLiveExtras(null);
-      setJugadoresLocal([]);
-      setJugadoresVisitante([]);
-      setGoles([]);
-      setTarjetas([]);
-      setMsg("");
+      setLiveById((prev) => ({
+        ...prev,
+        [partidoId]: {
+          partido:
+            prev[partidoId]?.partido ??
+            ({
+              id: partidoId,
+              fase: null,
+              estado: null,
+              fecha_hora: null,
+              goles_local: null,
+              goles_visitante: null,
+              equipo_local_id: null,
+              equipo_visitante_id: null,
+            } satisfies Partido),
+          extras: prev[partidoId]?.extras ?? null,
+          jugadoresLocal: prev[partidoId]?.jugadoresLocal ?? [],
+          jugadoresVisitante: prev[partidoId]?.jugadoresVisitante ?? [],
+          goles: prev[partidoId]?.goles ?? [],
+          tarjetas: prev[partidoId]?.tarjetas ?? [],
+          loading: true,
+          loadError: undefined,
+        },
+      }));
+
       const token = await getToken();
       if (!token) {
-        setMsg("No hay sesion: entra como organizador para usar Directo.");
-        setLiveLoading(false);
+        setLiveById((prev) => ({
+          ...prev,
+          [partidoId]: {
+            ...(prev[partidoId] ?? {
+              partido: {
+                id: partidoId,
+                fase: null,
+                estado: null,
+                fecha_hora: null,
+                goles_local: null,
+                goles_visitante: null,
+                equipo_local_id: null,
+                equipo_visitante_id: null,
+              },
+              extras: null,
+              jugadoresLocal: [],
+              jugadoresVisitante: [],
+              goles: [],
+              tarjetas: [],
+            }),
+            loading: false,
+            loadError: "No hay sesion: entra como organizador para usar Directo.",
+          },
+        }));
         return;
       }
+
       const res = await fetch(`/api/admin/directo?partido_id=${encodeURIComponent(partidoId)}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
-      if (expandedIdRef.current !== partidoId) {
-        setLiveLoading(false);
-        return;
-      }
+      if (!expandedIdsRef.current.includes(partidoId)) return;
+
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
         partido?: Partido & Record<string, unknown>;
@@ -269,49 +357,82 @@ export default function AdminDirectoPage() {
         goles?: GolLite[];
         tarjetas?: TarjLite[];
       };
-      if (!res.ok) {
-        setMsg(json.error ?? "No se pudieron cargar los datos del partido.");
-        setLiveLoading(false);
+
+      if (!res.ok || !json.partido) {
+        setLiveById((prev) => ({
+          ...prev,
+          [partidoId]: {
+            ...(prev[partidoId] ?? {
+              partido: {
+                id: partidoId,
+                fase: null,
+                estado: null,
+                fecha_hora: null,
+                goles_local: null,
+                goles_visitante: null,
+                equipo_local_id: null,
+                equipo_visitante_id: null,
+              },
+              extras: null,
+              jugadoresLocal: [],
+              jugadoresVisitante: [],
+              goles: [],
+              tarjetas: [],
+            }),
+            loading: false,
+            loadError: json.error ?? "No se pudieron cargar los datos del partido.",
+          },
+        }));
         return;
       }
-      if (expandedIdRef.current !== partidoId) {
-        setLiveLoading(false);
-        return;
-      }
-      if (json.partido) {
-        const p = json.partido as Partido & Record<string, number | null | undefined>;
-        setLivePartido({
-          id: p.id,
-          fase: p.fase ?? null,
-          estado: p.estado ?? null,
-          fecha_hora: p.fecha_hora ?? null,
-          goles_local: p.goles_local ?? null,
-          goles_visitante: p.goles_visitante ?? null,
-          equipo_local_id: p.equipo_local_id ?? null,
-          equipo_visitante_id: p.equipo_visitante_id ?? null,
-        });
-        setLiveExtras({
-          amarillas_local: p.amarillas_local ?? null,
-          amarillas_visitante: p.amarillas_visitante ?? null,
-          rojas_local: p.rojas_local ?? null,
-          rojas_visitante: p.rojas_visitante ?? null,
-          rojas_agresion_local: p.rojas_agresion_local ?? null,
-          rojas_agresion_visitante: p.rojas_agresion_visitante ?? null,
-        });
-      }
-      setJugadoresLocal((json.jugadores_local ?? []) as JugadorLite[]);
-      setJugadoresVisitante((json.jugadores_visitante ?? []) as JugadorLite[]);
-      setGoles((json.goles ?? []) as GolLite[]);
-      setTarjetas((json.tarjetas ?? []) as TarjLite[]);
-      setLiveLoading(false);
-      await load();
+
+      if (!expandedIdsRef.current.includes(partidoId)) return;
+
+      const p = json.partido as Partido & Record<string, number | null | undefined>;
+      const livePartido: Partido = {
+        id: p.id,
+        fase: p.fase ?? null,
+        estado: p.estado ?? null,
+        fecha_hora: p.fecha_hora ?? null,
+        goles_local: p.goles_local ?? null,
+        goles_visitante: p.goles_visitante ?? null,
+        equipo_local_id: p.equipo_local_id ?? null,
+        equipo_visitante_id: p.equipo_visitante_id ?? null,
+      };
+
+      setLiveById((prev) => ({
+        ...prev,
+        [partidoId]: {
+          partido: livePartido,
+          extras: {
+            amarillas_local: p.amarillas_local ?? null,
+            amarillas_visitante: p.amarillas_visitante ?? null,
+            rojas_local: p.rojas_local ?? null,
+            rojas_visitante: p.rojas_visitante ?? null,
+            rojas_agresion_local: p.rojas_agresion_local ?? null,
+            rojas_agresion_visitante: p.rojas_agresion_visitante ?? null,
+          },
+          jugadoresLocal: (json.jugadores_local ?? []) as JugadorLite[],
+          jugadoresVisitante: (json.jugadores_visitante ?? []) as JugadorLite[],
+          goles: (json.goles ?? []) as GolLite[],
+          tarjetas: (json.tarjetas ?? []) as TarjLite[],
+          loading: false,
+          loadError: undefined,
+        },
+      }));
+
+      setPartidos((prev) => prev.map((row) => (row.id === partidoId ? mergePartidoFromLive(row, livePartido) : row)));
     },
     [getToken],
   );
 
-  useEffect(() => {
-    if (expandedId) void fetchLiveDetail(expandedId);
-  }, [expandedId, fetchLiveDetail]);
+  function toggleExpand(id: string) {
+    setExpandedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      void fetchLiveDetail(id);
+      return [...prev, id];
+    });
+  }
 
   async function onCreateDirectorCampo() {
     setMsg("");
@@ -372,38 +493,9 @@ export default function AdminDirectoPage() {
     const scoringTeamId = goalModal.beneficiario === "local" ? goalModal.equipoLocalId : goalModal.equipoVisitId;
     const rivalTeamId = goalModal.beneficiario === "local" ? goalModal.equipoVisitId : goalModal.equipoLocalId;
     const team = goalModo === "normal" ? scoringTeamId : rivalTeamId;
-    const pool = [...jugadoresLocal, ...jugadoresVisitante].filter((jug) => jug.equipo_id === team);
+    const pool = [...goalJugadoresLocal, ...goalJugadoresVisitante].filter((jug) => jug.equipo_id === team);
     setGoalJugadorId(pool[0]?.id ?? "");
-  }, [goalModal, goalModo, jugadoresLocal, jugadoresVisitante]);
-
-  const timeline = useMemo(() => {
-    if (!livePartido?.equipo_local_id || !livePartido.equipo_visitante_id) return [];
-    const lid = livePartido.equipo_local_id;
-    type Row =
-      | { k: "gol"; id: string; sk: number; g: GolLite }
-      | { k: "tarjeta"; id: string; sk: number; t: TarjLite };
-    const rows: Row[] = [];
-    for (const g of goles) {
-      rows.push({ k: "gol", id: `g-${g.id}`, sk: eventSortKey(g.created_at, g.minuto, g.id), g });
-    }
-    for (const t of tarjetas) {
-      rows.push({ k: "tarjeta", id: `t-${t.id}`, sk: eventSortKey(t.created_at, null, t.id), t });
-    }
-    rows.sort((a, b) => a.sk - b.sk || a.id.localeCompare(b.id));
-    return rows.map((row) => {
-      if (row.k === "gol") {
-        const g = row.g;
-        const authorIsLocal = g.equipo_id === lid;
-        // Gol normal: lado del autor. Propia puerta: lado del equipo que SUM en el marcador (el rival del autor).
-        const alignLeft = g.propia_meta ? !authorIsLocal : authorIsLocal;
-        return { ...row, alignLeft, label: minutoLabel(g.minuto, g.created_at) };
-      }
-      const t = row.t;
-      const eid = t.equipo_id;
-      const alignLeft = eid === lid;
-      return { ...row, alignLeft, label: minutoLabel(null, t.created_at) };
-    });
-  }, [goles, tarjetas, livePartido]);
+  }, [goalModal, goalModo, goalJugadoresLocal, goalJugadoresVisitante]);
 
   const partidosActivos = useMemo(
     () => partidos.filter((p) => estadoNorm(p.estado) !== "finalizado").sort(partidoSortActivos),
@@ -452,18 +544,32 @@ export default function AdminDirectoPage() {
       }
     }
     if (estado === "finalizado") {
-      if (expandedId === id) setExpandedId(null);
+      setExpandedIds((prev) => prev.filter((x) => x !== id));
       setDirectoTab("activos");
     }
     if (estado === "jugandose") setDirectoTab("activos");
     await load();
+    if (expandedIdsRef.current.includes(id)) void fetchLiveDetail(id);
     return true;
+  }
+
+  async function setEstadoPendiente(partido: Partido) {
+    const enJuego = estadoNorm(partido.estado) === "jugandose";
+    const tieneMarcador = (partido.goles_local ?? 0) + (partido.goles_visitante ?? 0) > 0;
+    if (enJuego || tieneMarcador) {
+      const ok = window.confirm(
+        "¿Marcar este partido como pendiente? Se reiniciará el marcador y las incidencias de ESTE partido solamente.",
+      );
+      if (!ok) return;
+    }
+    await setEstado(partido.id, "pendiente");
   }
 
   async function handleComenzar(id: string) {
     const ok = await setEstado(id, "jugandose");
     if (!ok) return;
-    setExpandedId(id);
+    setExpandedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    void fetchLiveDetail(id);
   }
 
   async function postDirecto(payload: Record<string, unknown>): Promise<boolean> {
@@ -487,7 +593,12 @@ export default function AdminDirectoPage() {
       setMsg(json.error ?? "Error guardando cambios.");
       return false;
     }
-    if (expandedId) await fetchLiveDetail(expandedId);
+    const partidoId = typeof payload.partido_id === "string" ? payload.partido_id : null;
+    const idsToRefresh = partidoId ? [partidoId] : expandedIdsRef.current.slice();
+    for (const id of idsToRefresh) {
+      if (expandedIdsRef.current.includes(id)) await fetchLiveDetail(id);
+    }
+    await load();
     return true;
   }
 
@@ -506,7 +617,7 @@ export default function AdminDirectoPage() {
     const scoringTeamId = goalModal.beneficiario === "local" ? lid : vid;
     const rivalTeamId = goalModal.beneficiario === "local" ? vid : lid;
 
-    const j = [...jugadoresLocal, ...jugadoresVisitante].find((x) => x.id === goalJugadorId);
+    const j = [...goalJugadoresLocal, ...goalJugadoresVisitante].find((x) => x.id === goalJugadorId);
     if (!j) {
       setMsg("Selecciona un jugador válido.");
       return;
@@ -637,8 +748,8 @@ export default function AdminDirectoPage() {
     const scoring = goalModal.beneficiario === "local" ? goalModal.equipoLocalId : goalModal.equipoVisitId;
     const rival = goalModal.beneficiario === "local" ? goalModal.equipoVisitId : goalModal.equipoLocalId;
     const team = goalModo === "normal" ? scoring : rival;
-    return [...jugadoresLocal, ...jugadoresVisitante].filter((j) => j.equipo_id === team);
-  }, [goalModal, goalModo, jugadoresLocal, jugadoresVisitante]);
+    return [...goalJugadoresLocal, ...goalJugadoresVisitante].filter((j) => j.equipo_id === team);
+  }, [goalModal, goalModo, goalJugadoresLocal, goalJugadoresVisitante]);
 
   if (checkingRole) {
     return (
@@ -714,7 +825,6 @@ export default function AdminDirectoPage() {
             }`}
             onClick={() => {
               setDirectoTab("activos");
-              setExpandedId(null);
             }}
           >
             En directo
@@ -731,7 +841,6 @@ export default function AdminDirectoPage() {
             }`}
             onClick={() => {
               setDirectoTab("finalizados");
-              setExpandedId(null);
             }}
           >
             Finalizados
@@ -745,7 +854,7 @@ export default function AdminDirectoPage() {
 
         {directoTab === "activos" ? (
           <p className="text-xs text-slate-600">
-            Primero los que se están jugando, después los pendientes. Al finalizar un partido desaparece de aquí.
+            Primero los que se están jugando, después los pendientes. Puedes tener <strong>varios partidos en juego</strong> y abrir más de uno a la vez.
           </p>
         ) : (
           <p className="text-xs text-slate-600">
@@ -803,7 +912,14 @@ export default function AdminDirectoPage() {
             </p>
           ) : null}
           {partidosVisibles.map((p) => {
-            const abierto = expandedId === p.id;
+            const abierto = expandedIds.includes(p.id);
+            const live = liveById[p.id];
+            const livePartido = live?.partido;
+            const liveExtras = live?.extras ?? null;
+            const jugadoresLocal = live?.jugadoresLocal ?? [];
+            const jugadoresVisitante = live?.jugadoresVisitante ?? [];
+            const timeline = livePartido ? buildTimeline(livePartido, live?.goles ?? [], live?.tarjetas ?? []) : [];
+            const liveLoading = live?.loading ?? false;
             const tieneEquipos = Boolean(p.equipo_local_id && p.equipo_visitante_id);
             const enJuego = estadoNorm(p.estado) === "jugandose";
             const finalizado = estadoNorm(p.estado) === "finalizado";
@@ -824,7 +940,7 @@ export default function AdminDirectoPage() {
                 <button
                   type="button"
                   className="w-full text-left"
-                  onClick={() => setExpandedId(abierto ? null : p.id)}
+                  onClick={() => toggleExpand(p.id)}
                 >
                   <p className="font-semibold">
                     {n(p.equipo_local_id)} <span className="text-xl text-emerald-700">{p.goles_local ?? 0}</span>
@@ -840,32 +956,64 @@ export default function AdminDirectoPage() {
                     >
                       {p.estado ?? "pendiente"}
                     </span>
-                    {!abierto ? <span className="ml-2 text-violet-600">Mostrar incidentes ▾</span> : null}
+                    {!abierto ? <span className="ml-2 text-violet-600">Abrir directo ▾</span> : <span className="ml-2 text-violet-600">Cerrar ▴</span>}
                   </p>
                 </button>
 
                 <div className="mt-2 flex flex-wrap gap-2">
                   {directoTab === "activos" ? (
                     <>
-                      <button className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => void setEstado(p.id, "pendiente")}>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 px-2 py-1 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void setEstadoPendiente(p);
+                        }}
+                      >
                         Pendiente
                       </button>
-                      <button className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700" onClick={() => void handleComenzar(p.id)}>
+                      <button
+                        type="button"
+                        className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleComenzar(p.id);
+                        }}
+                      >
                         Comenzar
                       </button>
-                      <button className="rounded border border-violet-300 px-2 py-1 text-xs text-violet-700" onClick={() => void setEstado(p.id, "finalizado")}>
+                      <button
+                        type="button"
+                        className="rounded border border-violet-300 px-2 py-1 text-xs text-violet-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void setEstado(p.id, "finalizado");
+                        }}
+                      >
                         Finalizar
                       </button>
                     </>
                   ) : (
                     <>
                       <button
+                        type="button"
                         className="rounded border border-emerald-400 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
-                        onClick={() => void setEstado(p.id, "jugandose")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void setEstado(p.id, "jugandose");
+                        }}
                       >
                         Reabrir (jugándose)
                       </button>
-                      <button className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => void setEstado(p.id, "pendiente")}>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 px-2 py-1 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void setEstadoPendiente(p);
+                        }}
+                      >
                         Marcar pendiente
                       </button>
                     </>
@@ -876,10 +1024,10 @@ export default function AdminDirectoPage() {
                       className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setExpandedId(p.id);
+                        toggleExpand(p.id);
                       }}
                     >
-                      Solo ver incidencias
+                      Abrir directo
                     </button>
                   ) : null}
                 </div>
@@ -892,17 +1040,15 @@ export default function AdminDirectoPage() {
 
                 {abierto && tieneEquipos ? (
                   <div className="mt-4 border-t border-slate-100 pt-4">
-                    {expandedId === p.id && liveLoading ? (
+                    {abierto && liveLoading ? (
                       <p className="text-sm text-slate-500">Cargando plantillas e incidencias…</p>
                     ) : null}
 
-                    {expandedId === p.id && !liveLoading && livePartido?.id !== p.id ? (
-                      <p className="text-sm font-medium text-amber-900">
-                        No se ha podido cargar el detalle. Revisa el mensaje inferior o vuelve a abrir esta tarjeta.
-                      </p>
+                    {abierto && !liveLoading && live?.loadError ? (
+                      <p className="text-sm font-medium text-amber-900">{live.loadError}</p>
                     ) : null}
 
-                    {expandedId === p.id && !liveLoading && livePartido?.id === p.id ? (
+                    {abierto && !liveLoading && livePartido?.id === p.id ? (
                       <>
                         <div className="mb-6 rounded-xl bg-slate-900 px-4 py-4 text-white">
                           <p className="mb-3 text-center text-sm opacity-90">Marcador · toca el + para anotar gol</p>
