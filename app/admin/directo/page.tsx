@@ -337,16 +337,22 @@ export default function AdminDirectoPage() {
         telefono: dcTelefono.trim(),
       }),
     });
-    const json = (await res.json().catch(() => ({}))) as { error?: string; access_email_sent?: boolean };
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      mensaje?: string;
+      access_email_sent?: boolean;
+      email_error?: string;
+    };
     if (!res.ok) {
       setMsg(json.error ?? "No se pudo crear el director de campo.");
       setDcLoading(false);
       return;
     }
     setMsg(
-      json.access_email_sent
-        ? "Director de campo creado. Se envio correo para definir contrasena."
-        : "Director creado, pero no se pudo enviar correo automatico.",
+      json.mensaje ??
+        (json.access_email_sent
+          ? "Director de campo creado. Se envio correo para definir contrasena."
+          : `Director creado, pero no se pudo enviar correo automatico.${json.email_error ? ` (${json.email_error})` : ""}`),
     );
     setDcEmail("");
     setDcNombre("");
@@ -750,7 +756,8 @@ export default function AdminDirectoPage() {
           <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
             <h2 className="text-base font-bold text-violet-900">Alta de director de campo</h2>
             <p className="mt-1 text-xs text-violet-800">
-              Crea acceso para editar marcadores en directo. Se enviara email para definir contrasena.
+              Crea acceso para editar marcadores en directo. Se enviara un correo con enlace para crear la contrasena.
+              Si ya lo diste de alta y no llego el correo, vuelve a pulsar con el mismo email para reenviarlo.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Correo" type="email" value={dcEmail} onChange={(e) => setDcEmail(e.target.value)} />

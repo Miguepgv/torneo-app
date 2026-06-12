@@ -17,6 +17,19 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     async function bootstrapRecoverySession() {
       try {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        if (code) {
+          const next = encodeURIComponent("/reset-password");
+          window.location.replace(`/auth/callback?code=${encodeURIComponent(code)}&next=${next}`);
+          return;
+        }
+
+        const err = params.get("error");
+        if (err === "enlace_invalido") {
+          setMessage("El enlace no es valido o ha caducado. Pide uno nuevo desde login (Olvide mi contrasena).");
+        }
+
         const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
         const accessToken = hash.get("access_token");
         const refreshToken = hash.get("refresh_token");
