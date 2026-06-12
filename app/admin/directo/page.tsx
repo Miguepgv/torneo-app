@@ -183,6 +183,8 @@ export default function AdminDirectoPage() {
   const [dcNombre, setDcNombre] = useState("");
   const [dcApellidos, setDcApellidos] = useState("");
   const [dcTelefono, setDcTelefono] = useState("");
+  const [dcPassword, setDcPassword] = useState("");
+  const [dcShowPassword, setDcShowPassword] = useState(false);
   const [dcLoading, setDcLoading] = useState(false);
   const [directoTab, setDirectoTab] = useState<"activos" | "finalizados">("activos");
 
@@ -317,6 +319,10 @@ export default function AdminDirectoPage() {
       setMsg("Para crear director de campo necesitas al menos correo y nombre.");
       return;
     }
+    if (dcPassword.length < 6) {
+      setMsg("Indica una contrasena de al menos 6 caracteres.");
+      return;
+    }
     setDcLoading(true);
     const token = await getToken();
     if (!token) {
@@ -332,6 +338,7 @@ export default function AdminDirectoPage() {
       },
       body: JSON.stringify({
         email: dcEmail.trim().toLowerCase(),
+        password: dcPassword,
         nombre: dcNombre.trim(),
         apellidos: dcApellidos.trim(),
         telefono: dcTelefono.trim(),
@@ -340,24 +347,18 @@ export default function AdminDirectoPage() {
     const json = (await res.json().catch(() => ({}))) as {
       error?: string;
       mensaje?: string;
-      access_email_sent?: boolean;
-      email_error?: string;
     };
     if (!res.ok) {
       setMsg(json.error ?? "No se pudo crear el director de campo.");
       setDcLoading(false);
       return;
     }
-    setMsg(
-      json.mensaje ??
-        (json.access_email_sent
-          ? "Director de campo creado. Se envio correo para definir contrasena."
-          : `Director creado, pero no se pudo enviar correo automatico.${json.email_error ? ` (${json.email_error})` : ""}`),
-    );
+    setMsg(json.mensaje ?? "Director de campo creado. Ya puede entrar en Login con ese correo y contrasena.");
     setDcEmail("");
     setDcNombre("");
     setDcApellidos("");
     setDcTelefono("");
+    setDcPassword("");
     setDcLoading(false);
   }
 
@@ -756,14 +757,31 @@ export default function AdminDirectoPage() {
           <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
             <h2 className="text-base font-bold text-violet-900">Alta de director de campo</h2>
             <p className="mt-1 text-xs text-violet-800">
-              Crea acceso para editar marcadores en directo. Se enviara un correo con enlace para crear la contrasena.
-              Si ya lo diste de alta y no llego el correo, vuelve a pulsar con el mismo email para reenviarlo.
+              Crea el acceso con correo y contrasena. No se envia email: tu le das los datos y entra en Login.
+              Si ya existe, se actualiza la contrasena y el rol.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Correo" type="email" value={dcEmail} onChange={(e) => setDcEmail(e.target.value)} />
+              <div className="flex gap-2">
+                <input
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 p-2 text-sm"
+                  placeholder="Contrasena (min. 6)"
+                  type={dcShowPassword ? "text" : "password"}
+                  value={dcPassword}
+                  onChange={(e) => setDcPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg border border-slate-300 px-2 text-xs font-semibold text-slate-700"
+                  onClick={() => setDcShowPassword((v) => !v)}
+                >
+                  {dcShowPassword ? "Ocultar" : "Ver"}
+                </button>
+              </div>
               <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Nombre" value={dcNombre} onChange={(e) => setDcNombre(e.target.value)} />
               <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Apellidos (opcional)" value={dcApellidos} onChange={(e) => setDcApellidos(e.target.value)} />
-              <input className="rounded-lg border border-slate-300 p-2 text-sm" placeholder="Telefono (opcional)" value={dcTelefono} onChange={(e) => setDcTelefono(e.target.value)} />
+              <input className="rounded-lg border border-slate-300 p-2 text-sm sm:col-span-2" placeholder="Telefono (opcional)" value={dcTelefono} onChange={(e) => setDcTelefono(e.target.value)} />
             </div>
             <button
               type="button"

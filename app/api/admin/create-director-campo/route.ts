@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { INVITE_USER_METADATA, markAuthUserMustSetPassword } from "@/lib/server/auth-invite-metadata";
-import { setPasswordAuthCallbackUrl } from "@/lib/server/auth-redirect";
 import { findAuthUserIdByEmail } from "@/lib/server/resolve-delegado";
 
 type Body = {
   email?: string;
+  password?: string;
   nombre?: string;
   apellidos?: string;
   telefono?: string;
@@ -37,19 +36,30 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json()) as Body;
   const email = (body.email ?? "").trim().toLowerCase();
+  const password = body.password ?? "";
   const nombre = (body.nombre ?? "").trim();
   const apellidos = (body.apellidos ?? "").trim();
   const telefono = (body.telefono ?? "").trim();
+
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "Indica un correo valido." }, { status: 400 });
   }
   if (!nombre) {
     return NextResponse.json({ error: "El nombre es obligatorio." }, { status: 400 });
   }
+  if (password.length < 6) {
+    return NextResponse.json({ error: "La contrasena debe tener al menos 6 caracteres." }, { status: 400 });
+  }
 
   const adminClient = createClient(url, serviceRoleKey);
-  const redirectTo = setPasswordAuthCallbackUrl(request);
   const fullName = `${nombre} ${apellidos}`.trim() || nombre;
+  const authMeta = {
+    nombre,
+    apellidos,
+    nombre_completo: fullName,
+    rol_app: "director_campo",
+    must_set_password: false,
+  };
 
   const { data: existing } = await adminClient
     .from("usuarios")
@@ -58,59 +68,55 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   let userId: string | null = existing?.id ?? null;
-  let invitedNewUser = false;
-  let accessEmailSent = false;
-  let emailError: string | null = null;
+  let createdNewUser = false;
   const alreadyDirector = existing?.rol === "director_campo";
 
   if (!userId) {
-    const invite = await adminClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo,
-      data: {
-        nombre,
-        apellidos,
-        nombre_completo: fullName,
-        rol_app: "director_campo",
-        ...INVITE_USER_METADATA,
-      },
+    const created = await adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: authMeta,
     });
 
-    if (!invite.error && invite.data?.user?.id) {
-      userId = invite.data.user.id;
-      invitedNewUser = true;
-      accessEmailSent = true;
+    if (!created.error && created.data.user?.id) {
+      userId = created.data.user.id;
+      createdNewUser = true;
     } else {
-      const msg = invite.error?.message?.toLowerCase() ?? "";
+      const msg = created.error?.message?.toLowerCase() ?? "";
       const already =
         msg.includes("already") ||
         msg.includes("registered") ||
         msg.includes("exists") ||
-        invite.error?.status === 422;
+        created.error?.status === 422;
       if (!already) {
         return NextResponse.json(
-          { error: invite.error?.message ?? "No se pudo enviar la invitacion." },
+          { error: created.error?.message ?? "No se pudo crear el usuario." },
           { status: 400 },
         );
       }
       userId = await findAuthUserIdByEmail(adminClient.auth.admin, email);
       if (!userId) {
         return NextResponse.json(
-          {
-            error:
-              "El correo parece estar en uso en Auth pero no se pudo localizar. Revisa Supabase > Authentication > Users.",
-          },
+          { error: "El correo ya existe en Auth pero no se pudo localizar el usuario." },
           { status: 400 },
         );
       }
     }
   }
 
-  if (!invitedNewUser) {
-    const anon = createClient(url, anonKey);
-    const reset = await anon.auth.resetPasswordForEmail(email, { redirectTo });
-    accessEmailSent = !reset.error;
-    emailError = reset.error?.message ?? null;
-    if (userId) await markAuthUserMustSetPassword(adminClient.auth.admin, userId);
+  if (!createdNewUser && userId) {
+    const updated = await adminClient.auth.admin.updateUserById(userId, {
+      password,
+      email_confirm: true,
+      user_metadata: authMeta,
+    });
+    if (updated.error) {
+      return NextResponse.json(
+        { error: updated.error.message ?? "No se pudo actualizar la contrasena del usuario." },
+        { status: 400 },
+      );
+    }
   }
 
   const perfil: Record<string, unknown> = {
@@ -140,24 +146,17 @@ export async function POST(request: NextRequest) {
 
   let mensaje: string;
   if (alreadyDirector) {
-    mensaje = accessEmailSent
-      ? "Ya era director de campo. Se ha reenviado un correo para crear o cambiar la contraseña."
-      : "Ya era director de campo, pero no se pudo enviar el correo automatico.";
-  } else if (invitedNewUser) {
-    mensaje = "Invitacion enviada. Recibira un correo para crear su contraseña y entrar por primera vez.";
+    mensaje = "Director de campo actualizado. Ya puede entrar con el correo y la contrasena indicados.";
+  } else if (createdNewUser) {
+    mensaje = "Director de campo creado. Comunica el correo y la contrasena para que entre en Login.";
   } else {
-    mensaje = accessEmailSent
-      ? "Director de campo registrado. Se ha enviado un correo para definir contraseña y acceder."
-      : "Director registrado, pero no se pudo enviar el correo automatico.";
+    mensaje = "Usuario existente configurado como director de campo. Ya puede entrar con esa contrasena.";
   }
 
   return NextResponse.json({
     ok: true,
     mensaje,
-    invited_new_user: invitedNewUser,
+    created_new_user: createdNewUser,
     already_director: alreadyDirector,
-    access_email_sent: accessEmailSent,
-    email_error: emailError,
-    redirect_usado: redirectTo,
   });
 }
