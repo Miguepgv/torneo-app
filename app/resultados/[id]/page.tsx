@@ -25,6 +25,72 @@ type GolRow = {
   propia_meta?: boolean | null;
 };
 
+function minutoGolLabel(minuto: number | null): string {
+  if (minuto != null && minuto >= 0) return `${minuto}'`;
+  return "—";
+}
+
+/** Gol normal: lado del autor. Propia puerta: lado del equipo que suma en el marcador. */
+function golCuentaEnLocal(
+  gol: GolRow,
+  localId: string | null,
+  visitId: string | null,
+): boolean {
+  if (!localId || !visitId || !gol.equipo_id) return true;
+  const autorEsLocal = gol.equipo_id === localId;
+  if (gol.propia_meta) return !autorEsLocal;
+  return autorEsLocal;
+}
+
+function GolTimelineItem(props: {
+  gol: GolRow & { nombreCompleto: string; alias: string | null; fotoUrl: string | null };
+  esLocal: boolean;
+}) {
+  const { gol, esLocal } = props;
+  const minuto = minutoGolLabel(gol.minuto);
+
+  const contenido = (
+    <>
+      <JugadorGoalAvatar fotoUrl={gol.fotoUrl} nombreCompleto={gol.nombreCompleto} />
+      <div className={`min-w-0 ${esLocal ? "text-left" : "text-right"}`}>
+        <span className="block font-medium text-slate-900">{gol.nombreCompleto}</span>
+        {gol.alias ? (
+          <span className="mt-0.5 block text-sm font-semibold text-violet-600">{gol.alias}</span>
+        ) : null}
+        {gol.propia_meta ? (
+          <span className="mt-0.5 block text-xs font-semibold text-amber-800">Propia puerta</span>
+        ) : null}
+      </div>
+    </>
+  );
+
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1">
+      {esLocal ? (
+        <div className="flex items-center gap-2 justify-self-start rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          {contenido}
+          <span className="ml-1 text-base leading-none text-slate-800" aria-hidden>
+            ⚽
+          </span>
+        </div>
+      ) : (
+        <span />
+      )}
+      <span className="justify-self-center text-sm font-bold text-emerald-700">{minuto}</span>
+      {!esLocal ? (
+        <div className="flex flex-row-reverse items-center gap-2 justify-self-end rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          {contenido}
+          <span className="mr-1 text-base leading-none text-slate-800" aria-hidden>
+            ⚽
+          </span>
+        </div>
+      ) : (
+        <span />
+      )}
+    </li>
+  );
+}
+
 function JugadorGoalAvatar(props: {
   fotoUrl: string | null | undefined;
   nombreCompleto: string;
@@ -187,31 +253,21 @@ export default function ResultadoDetallePage() {
             </p>
 
             <h2 className="mt-6 text-lg font-semibold text-slate-900">Goles del partido</h2>
+            {goles.length > 0 ? (
+              <p className="mt-1 text-xs text-slate-500">
+                {localNombre} a la izquierda · {visitNombre} a la derecha
+              </p>
+            ) : null}
             {goles.length === 0 ? (
               <p className="mt-2 text-slate-600">No hay goles registrados en este partido.</p>
             ) : (
-              <ul className="mt-2 grid gap-2">
+              <ul className="mt-3 grid gap-3">
                 {goles.map((g) => (
-                  <li
+                  <GolTimelineItem
                     key={g.id}
-                    className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800"
-                  >
-                    <JugadorGoalAvatar fotoUrl={g.fotoUrl} nombreCompleto={g.nombreCompleto} />
-                    <div className="min-w-0 flex-1">
-                      <span className="block font-medium">{g.nombreCompleto}</span>
-                      {g.alias ? (
-                        <span className="mt-0.5 block text-sm font-semibold text-violet-600">{g.alias}</span>
-                      ) : null}
-                      <span className="mt-0.5 block text-sm text-slate-600">
-                        {g.minuto != null ? `Min ${g.minuto}` : "Min —"}
-                        {g.propia_meta ? (
-                          <span className="ml-2 rounded bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">
-                            Propia puerta
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  </li>
+                    gol={g}
+                    esLocal={golCuentaEnLocal(g, partido.equipo_local_id, partido.equipo_visitante_id)}
+                  />
                 ))}
               </ul>
             )}
