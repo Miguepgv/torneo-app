@@ -13,6 +13,8 @@ type Partido = {
   fase: string | null;
   equipo_local_id: string | null;
   equipo_visitante_id: string | null;
+  slot_local?: string | null;
+  slot_visitante?: string | null;
 };
 
 function estadoNorm(estado: string | null | undefined) {
@@ -46,10 +48,10 @@ function sortPartidos(list: Partido[], tab: "activos" | "finalizados") {
 
 function PartidoCard({
   p,
-  nombreEquipo,
+  etiquetaLado,
 }: {
   p: Partido;
-  nombreEquipo: (id: string | null) => string;
+  etiquetaLado: (partido: Partido, side: "local" | "visit") => string;
 }) {
   const vivo = estadoNorm(p.estado) === "jugandose";
   const finalizado = estadoNorm(p.estado) === "finalizado";
@@ -66,10 +68,10 @@ function PartidoCard({
     >
       <div>
         <p className="font-bold text-slate-900">
-          {nombreEquipo(p.equipo_local_id)}{" "}
+          {etiquetaLado(p, "local")}{" "}
           <span className="text-violet-800">{p.goles_local ?? 0}</span>
           {" — "}
-          <span className="text-violet-800">{p.goles_visitante ?? 0}</span> {nombreEquipo(p.equipo_visitante_id)}
+          <span className="text-violet-800">{p.goles_visitante ?? 0}</span> {etiquetaLado(p, "visit")}
         </p>
         <p className="mt-1 text-sm text-slate-600">
           {p.fecha_hora ? new Date(p.fecha_hora).toLocaleString("es-ES") : "Fecha por confirmar"} ·{" "}
@@ -93,7 +95,7 @@ export default function ResultadosPage() {
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
       .from("partidos")
-      .select("id,estado,fecha_hora,goles_local,goles_visitante,fase,equipo_local_id,equipo_visitante_id");
+      .select("id,estado,fecha_hora,goles_local,goles_visitante,fase,equipo_local_id,equipo_visitante_id,slot_local,slot_visitante");
 
     if (error) {
       setMessage(`Error cargando partidos: ${error.message}`);
@@ -151,9 +153,15 @@ export default function ResultadosPage() {
   );
   const visibles = tab === "activos" ? partidosActivos : partidosFinalizados;
 
-  function nombreEquipo(id: string | null) {
-    if (!id) return "—";
-    return nombresEquipo[id] ?? "Equipo";
+  function etiquetaLado(partido: Partido, side: "local" | "visit") {
+    if (side === "local") {
+      if (partido.equipo_local_id) return nombresEquipo[partido.equipo_local_id] ?? "Equipo";
+      if (partido.slot_local?.trim()) return partido.slot_local.trim();
+      return "Por definir";
+    }
+    if (partido.equipo_visitante_id) return nombresEquipo[partido.equipo_visitante_id] ?? "Equipo";
+    if (partido.slot_visitante?.trim()) return partido.slot_visitante.trim();
+    return "Por definir";
   }
 
   return (
@@ -223,7 +231,7 @@ export default function ResultadosPage() {
 
         <div className="grid gap-3">
           {visibles.map((p) => (
-            <PartidoCard key={p.id} p={p} nombreEquipo={nombreEquipo} />
+            <PartidoCard key={p.id} p={p} etiquetaLado={etiquetaLado} />
           ))}
         </div>
       </div>
